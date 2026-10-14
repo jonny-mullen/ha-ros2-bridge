@@ -14,7 +14,7 @@ jobs:
     name: rclpy-free core tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           # ROS 2 Jazzy runs Python 3.12.
@@ -49,7 +49,7 @@ jobs:
       # container is disposable, so pip is allowed to install paho-mqtt into it.
       PIP_BREAK_SYSTEM_PACKAGES: "1"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Install ROS dependencies with rosdep
         run: |
           apt-get update
@@ -74,7 +74,7 @@ jobs:
     name: SPDX headers
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
