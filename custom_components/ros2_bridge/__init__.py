@@ -68,7 +68,11 @@ async def _async_call_registrar(hass: HomeAssistant, module_name: str, function:
     module stays importable (and hassfest-checkable) on its own, and so that a
     test can stand in a stub through ``sys.modules`` without touching the files.
     """
-    module = importlib.import_module(module_name, __package__)
+    # Importing inside the event loop is a blocking call that Home Assistant flags;
+    # the import executor is the sanctioned place for it.
+    module = await hass.async_add_import_executor_job(
+        importlib.import_module, module_name, __package__
+    )
     result = getattr(module, function)(hass)
     if inspect.isawaitable(result):
         await result

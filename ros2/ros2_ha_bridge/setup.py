@@ -25,6 +25,9 @@ setup(
         ('share/' + package_name + '/config', glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
+    # colcon only runs the test/ folder with pytest when the package declares pytest as a
+    # test requirement; without this line it falls back to unittest and runs nothing.
+    tests_require=['pytest'],
     zip_safe=True,
     maintainer='TODO maintainer name',
     maintainer_email='TODO-maintainer@example.com',

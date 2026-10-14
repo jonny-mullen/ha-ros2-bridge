@@ -23,6 +23,15 @@ skipped and the schema validator still works from the vendored copy.
 from __future__ import annotations
 
 import json
+
+# Under ``colcon test`` on a ROS 2 install the launch_testing pytest plugin is
+# auto-loaded and imports ``launch.logging``, which replaces Python's logger
+# class with ``LaunchLogger``: every logger created from then on has
+# ``propagate = False``, so pytest's ``caplog`` sees nothing and the messages
+# fall through to stderr. The standard class is put back here, before any test
+# module imports the package, and any package logger that already exists is
+# made to propagate again.
+import logging as _logging
 import os
 import subprocess
 import sys
@@ -37,6 +46,11 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 from referencing import Registry
 from referencing.jsonschema import DRAFT202012
+
+_logging.setLoggerClass(_logging.Logger)
+for _name, _logger in list(_logging.Logger.manager.loggerDict.items()):
+    if isinstance(_logger, _logging.Logger) and _name.startswith('ros2_ha_bridge'):
+        _logger.propagate = True
 
 import ros2_ha_bridge
 

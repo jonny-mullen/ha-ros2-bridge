@@ -26,6 +26,7 @@ from custom_components.ros2_bridge.intent import (
     SPEECH_WHICH_ARM,
     _speech_for_error,
     async_register_intents,
+    async_setup_intents,
 )
 from custom_components.ros2_bridge.models import Robot
 from custom_components.ros2_bridge.services import DATA_HUB
@@ -101,6 +102,15 @@ async def test_intents_register_once(hass: HomeAssistant) -> None:
     assert len([h for h in intent.async_get(hass) if h.intent_type == INTENT_SEND_TASK]) == 1
     send = handlers[INTENT_SEND_TASK]
     assert send.slot_schema is not None and send.async_validate_slots({"task": {"value": "x"}})
+
+
+async def test_async_setup_intents_is_the_platform_hook(hass: HomeAssistant) -> None:
+    """Home Assistant's intent component calls this name for an intent.py platform."""
+    await async_setup_intents(hass)
+    await async_setup_intents(hass)
+    async_register_intents(hass)
+    assert len([h for h in intent.async_get(hass) if h.intent_type == INTENT_SEND_TASK]) == 1
+    assert len([h for h in intent.async_get(hass) if h.intent_type == INTENT_CANCEL_TASK]) == 1
 
 
 async def test_not_loaded_speech(hass: HomeAssistant) -> None:

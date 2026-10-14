@@ -372,3 +372,14 @@ def async_register_intents(hass: HomeAssistant) -> None:
         intent.async_register(hass, Ros2BridgeSendTaskHandler())
     if INTENT_CANCEL_TASK not in registered:
         intent.async_register(hass, Ros2BridgeCancelTaskHandler())
+
+
+async def async_setup_intents(hass: HomeAssistant) -> None:
+    """The hook Home Assistant's intent component calls for an ``intent.py`` platform.
+
+    Home Assistant processes every loaded integration's ``intent`` platform and
+    expects this name; without it the intent component logs an error at setup.
+    Registration is idempotent, so being called here and from ``async_setup``
+    registers each handler exactly once.
+    """
+    async_register_intents(hass)
