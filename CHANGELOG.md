@@ -4,7 +4,25 @@ All notable changes to ha-ros2-bridge are recorded here. The format follows Keep
 
 ## [Unreleased]
 
-Pre-release work towards 0.1.0, by delivery phase. Nothing in this tree has moved an arm; the fake executor is the only one that has run. The dated subsections below are working days, not releases.
+Nothing yet.
+
+## [0.1.0] - 2026-10-14
+
+The first release: a Home Assistant custom integration (`custom_components/ros2_bridge`, installable through HACS as a custom repository) and a ROS 2 Jazzy package (`ros2/ros2_ha_bridge`), joined by the MQTT contract under `contract/`. Home Assistant sends named tasks to robots and sees their state and results; ROS 2 runs the tasks through an executor plugin and owns safety. Requirements: Home Assistant 2026.10.0 or newer with the MQTT integration on an MQTT 5 broker, ROS 2 Jazzy on Ubuntu 24.04, paho-mqtt 2.1.0 from pip.
+
+Verified for this release:
+
+- `colcon test` inside `ros:jazzy-ros-base`: 983 tests, 0 failures. The rclpy-free core suite: 932 tests on plain Python.
+- The Home Assistant suite: 506 tests, 96 percent coverage, hassfest and the HACS validation green in CI.
+- The live end-to-end checklist (`tools/e2e_checklist.md`) run on 2026-10-14 against Home Assistant 2026.10.1 with the Mosquitto add-on 7.1.1 and two fake arms in Docker: steps 1 to 13 pass, including watchdog modes, a Home Assistant restart mid-task, a duplicate robot id, device deletion and the voice path through Assist.
+- Measured latency (`docs/architecture.md`): command to retained ack median 49 ms, p95 59 ms, through the broker and back.
+
+Defects found on the live run and fixed before this tag: the intent platform hook name and an import inside the event loop; the ROS log handler and rclpy's one-severity-per-call-site rule; takeover detection on Mosquitto 2.1, which evicts a duplicated client id with reason code 0 rather than 142; the last-result sensor lost on an options reload; and the Assist slot `name`, which Home Assistant resolves as an entity name (now `robot`).
+
+Known limitations: the MoveIt 2 executor is experimental (unit-tested with a fake adapter, never run against a real `move_group`; `docs/simulator_checklist.md` is the procedure for the Isaac site); signed commands (HMAC) are tested in both suites but have not been exercised on a live broker; a topic-prefix change and the node-side `mirror.topics` subscription are covered by unit tests only; the voice check used Home Assistant's conversation service rather than a Voice PE; the stock Mosquitto add-on's missing ACL enforcement is reported from an open issue, not reproduced; one motion task runs at a time per robot (`rejected_busy`, no queue); a changed task catalogue needs a node restart.
+
+The dated subsections below are the development record by delivery phase.
+
 
 ### 2026-10-14
 
@@ -28,11 +46,11 @@ Phase 3 (Home Assistant integration) and the phase 4 to 7 hardening, documentati
 - `docs/decisions.md`: phase 3 and phase 4 to 7 decisions appended, and open question (h) on releasing 0.1.0 after fake-only verification.
 - Repair pass, same day: the MoveIt executor's `stop` task clears the robot error only when move_group confirms the goal ended (with `moveit.hold_on_cancel` true; at once with it false), a goal move_group rejects after a cancel request ends `cancelled` rather than `aborted/unavailable`, and the module and `docs/writing-an-executor.md` carry the experimental marker; `unavailable` joins the recommended result-code vocabulary in `docs/mqtt-contract.md` and the schema description; `docs/configuration.md` gains the `moveit.*` table and `docs/install-ros2.md` the `ROS2_HA_BRIDGE_WITH_MOVEIT` note; `docs/safety.md` qualifies the no-replay promise with the recorded one-second dedupe window; the two Markdown Python fences that failed `ruff format --check` are reformatted.
 
-#### Pending verification
+#### Verified later the same day
 
-- The container `colcon build` and `colcon test` run and the live Home Assistant end-to-end checklist are blocked on the development PC until WSL is reset; both are recorded as pending, not done.
-- The MoveIt reference executor has not been run against a real `move_group` or Isaac Sim; the simulator rehearsal is pending.
-- No latency numbers have been measured yet; `docs/architecture.md` still shows the provisional targets.
+- The container `colcon build` and `colcon test` run (983 tests) and the live Home Assistant end-to-end checklist (steps 1 to 13) were completed after WSL was reset; results in `tools/e2e_checklist.md`.
+- Latency was measured on the live broker; numbers in `docs/architecture.md`.
+- The MoveIt reference executor remains unverified against a real `move_group` or Isaac Sim.
 
 ### 2026-10-13
 

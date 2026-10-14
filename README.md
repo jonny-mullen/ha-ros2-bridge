@@ -2,7 +2,7 @@
 
 Home Assistant and ROS 2, side by side, joined by MQTT. Home Assistant owns the sensors, dashboards, automations and voice; ROS 2 owns the robots. This repository ships both halves of the bridge and the written contract between them.
 
-**Status: pre-release, 0.1.0 not yet tagged. Phases 0 to 7 are implemented and tested, the ROS 2 package passes `colcon test` in the Jazzy container (983 tests), and the live end-to-end checklist was run on 2026-10-14 against a Home Assistant 2026.10.1 instance with two fake arms in Docker (`tools/e2e_checklist.md`: steps 1 to 13 pass, three defects found and fixed the same day). Nothing here has moved a real arm; the MoveIt executor is experimental until the Isaac site rehearsal.**
+**Status: 0.1.0, released 2026-10-14. The ROS 2 package passes `colcon test` in the Jazzy container, the Home Assistant integration passes its suite and hassfest, and the live end-to-end checklist was run against a Home Assistant 2026.10.1 instance with two fake arms in Docker (`tools/e2e_checklist.md`). Nothing here has moved a real arm; the MoveIt executor is experimental until the Isaac site rehearsal.**
 
 ## What it is
 
