@@ -623,6 +623,34 @@ def test_session_takeover_logs_counts_and_backs_off(
     assert rig.broker.retained_payload(TOPICS.availability) == b'offline', 'the will fired'
 
 
+def test_broker_eviction_soon_after_connect_counts_as_a_takeover(
+    rig: Rig, errors: pytest.LogCaptureFixture
+) -> None:
+    """Mosquitto 2.1 evicts the older holder of a client id with reason code 0, not 142."""
+    rig.start()
+    rig.clock.advance(3)
+    rig.broker.evict(CLIENT_ID)
+    assert rig.counters.takeovers == 1 and rig.link.takeovers_in_window == 1
+    assert rig.client.reconnect_delay == (2, 30), 'minimum delay doubled once'
+    events = [i for i in rig.link.drain() if isinstance(i, ml.DisconnectEvent)]
+    assert len(events) == 1 and events[0].taken_over and events[0].reason_code == 0
+    message = records(errors, logging.ERROR)[-1].getMessage()
+    assert 'taken over' in message and 'reason code 0' in message and 'robot.id' in message
+    assert rig.broker.retained_payload(TOPICS.availability) == b'offline', 'the will fired'
+
+
+def test_broker_eviction_long_after_connect_is_an_ordinary_disconnect(
+    rig: Rig, errors: pytest.LogCaptureFixture
+) -> None:
+    rig.start()
+    rig.clock.advance(ml.TAKEOVER_SUSPECT_S + 1)
+    rig.broker.evict(CLIENT_ID)
+    assert rig.counters.takeovers == 0 and rig.link.takeovers_in_window == 0
+    events = [i for i in rig.link.drain() if isinstance(i, ml.DisconnectEvent)]
+    assert len(events) == 1 and not events[0].taken_over
+    assert records(errors, logging.ERROR) == []
+
+
 def flap(rig: Rig, intruder: FakeMqttClient, times: int) -> None:
     """Make the link's client and the intruder take the session from each other ``times`` times."""
     for index in range(times):

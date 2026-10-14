@@ -39,7 +39,9 @@ logged at DEBUG and reported as True; a QoS 0 publish while disconnected is
 lost and counted.
 
 Session takeover: a broker-sent DISCONNECT with reason code 142 ("Session
-taken over") means another client connected with the same client id, which
+taken over"), or any broker-sent DISCONNECT within :data:`TAKEOVER_SUSPECT_S`
+of a successful connect (Mosquitto 2.1 evicts the older client with reason
+code 0), means another client connected with the same client id, which
 for this node means another bridge process with the same ``robot.id``
 (``mqtt.client_id`` is a function of it by design). The link logs an ERROR that
 says so, counts ``takeovers``, doubles the reconnect delay per takeover so two
@@ -143,6 +145,10 @@ DEFAULT_WARN_INTERVAL_S = 10.0
 TAKEOVER_WINDOW_S = 600.0
 #: MQTT 5 DISCONNECT reason code "Session taken over".
 REASON_SESSION_TAKEN_OVER = 142
+#: A broker-sent DISCONNECT this soon after a successful connect is treated as a takeover
+#: even without reason code 142: Mosquitto 2.1 evicts the older holder of a duplicated
+#: client id with a plain broker-sent DISCONNECT (reason code 0), as the first live run showed.
+TAKEOVER_SUSPECT_S = 10.0
 #: Key under which a TCP-level connection failure is logged once (no reason code exists).
 _UNREACHABLE_KEY = -1
 
@@ -377,6 +383,7 @@ class MqttLink:
         self._takeover_times: deque[float] = deque()
         self._backed_off = False
         self._exit_reason: str | None = None
+        self._connected_at: float | None = None
 
         factory = client_factory if client_factory is not None else mqtt.Client
         self._client = factory(
@@ -658,6 +665,7 @@ class MqttLink:
             self._connack_seen = True
             if code == 0:
                 self._connected = True
+                self._connected_at = self._clock.monotonic()
                 self._connects += 1
                 self._failures_logged.clear()
                 session_present = bool(getattr(flags, 'is_session_present', False))
@@ -711,8 +719,19 @@ class MqttLink:
             if self._closed:
                 self._logger.debug('disconnected during shutdown: %s (%d)', name, code)
                 return
-            taken_over = code == REASON_SESSION_TAKEN_OVER
-            exit_requested = self._on_takeover() if taken_over else False
+            taken_over_by_code = code == REASON_SESSION_TAKEN_OVER
+            # Mosquitto 2.1 evicts the older client of a duplicated client id with a plain
+            # broker-sent DISCONNECT (reason code 0) rather than 142, so a broker-initiated
+            # disconnect this soon after a successful connect counts as a takeover as well.
+            connected_at = self._connected_at
+            suspect = (
+                not taken_over_by_code
+                and from_server
+                and connected_at is not None
+                and self._clock.monotonic() - connected_at < TAKEOVER_SUSPECT_S
+            )
+            taken_over = taken_over_by_code or suspect
+            exit_requested = self._on_takeover(code, name) if taken_over else False
             if not taken_over:
                 self._restore_backoff_if_quiet()
                 self._logger.warning(
@@ -854,8 +873,16 @@ class MqttLink:
             self.config.reconnect_max_s,
         )
 
-    def _on_takeover(self) -> bool:
+    def _on_takeover(self, code: int, name: str) -> bool:
         """Count a takeover, back off, and decide whether the node must exit. Returns the decision."""
+        if code == REASON_SESSION_TAKEN_OVER:
+            how = f'reason code {code}, "{name}"'
+        else:
+            how = (
+                f'the broker closed the connection with reason code {code} ("{name}") within '
+                f'{TAKEOVER_SUSPECT_S:g} s of connecting, which is how it evicts a client id that '
+                'another connection claimed'
+            )
         now = self._clock.monotonic()
         self._prune_takeovers(now)
         self._takeover_times.append(now)
@@ -872,11 +899,11 @@ class MqttLink:
                 f'{count} times within {TAKEOVER_WINDOW_S / 60:g} minutes'
             )
         self._logger.error(
-            'MQTT session for client id %r was taken over by another connection (reason code '
-            '%d, "Session taken over"): most likely a second bridge node is running with the '
-            'same robot.id. Takeover %d%s within %g minutes; reconnecting after %d s%s',
+            'MQTT session for client id %r was taken over by another connection (%s): most '
+            'likely a second bridge node is running with the same robot.id. Takeover %d%s '
+            'within %g minutes; reconnecting after %d s%s',
             self.config.client_id,
-            REASON_SESSION_TAKEN_OVER,
+            how,
             count,
             f' of {limit}' if limit > 0 else '',
             TAKEOVER_WINDOW_S / 60,

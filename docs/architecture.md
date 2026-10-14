@@ -139,7 +139,17 @@ HA is advisory; ROS 2 owns safety. The HA-to-robot heartbeat is informational by
 
 ## Measured latency
 
-Not yet measured (phase 5).
+First measurement, 2026-10-14, with `tools/latency_probe.py` on the development PC: broker is the Mosquitto add-on on the Home Assistant OS box, the bridge node runs in Docker Desktop on a Windows PC on the same wired LAN, so the node's half of the path crosses the Docker VM's network stack.
+
+| Measure (20 commands, 14 heartbeat intervals) | min | median | p95 | max |
+|---|---|---|---|---|
+| Command publish to retained ack seen (round trip through the broker and the node) | 41 ms | 49 ms | 59 ms | 61 ms |
+| Publish to PUBACK (broker hop, QoS 1) | 0.8 ms | 1.5 ms | 2.4 ms | 41 ms |
+| Heartbeat period as received (nominal 2000 ms) | 1971 ms | 2010 ms | 2073 ms | 2073 ms |
+| Heartbeat jitter (absolute) | 2.5 ms | 23 ms | 73 ms | 73 ms |
+
+Reading: one way from a publish on the broker to the node acting on it is about half the round trip, roughly 25 ms, well inside the provisional 200 ms fast-path target. The broker itself adds about a millisecond. Clock skew reported by the node ranged from -59 ms to +14 ms over the run; the Docker VM's clock drifts against the HA host by a few hundred milliseconds between corrections, which is a test-rig artefact (a real site runs NTP on the ROS 2 host).
+
 
 Provisional targets from the plan (Q8), to be confirmed or tightened by Jonny once `tools/latency_probe.py` has run on a real LAN:
 

@@ -48,6 +48,7 @@ from homeassistant.util import dt as dt_util
 from .commands import (
     CommandRegistry,
     RegistrySettings,
+    ResultDisposition,
     RobotSnapshot,
     TooManyPendingError,
 )
@@ -1001,8 +1002,30 @@ class BridgeHub:
         if result.robot_id != robot_id or result.id != task_id:
             self.counters["mismatched_payloads"] += 1
             return
-        self._robot(robot_id, create=True)
-        self.registry.handle_result(result, retained=msg.retain)
+        robot = self._robot(robot_id, create=True)
+        disposition = self.registry.handle_result(result, retained=msg.retain)
+        if (
+            robot is not None
+            and disposition is ResultDisposition.DUPLICATE
+            and msg.retain
+            and str(result.kind) == str(TaskKind.MOTION)
+        ):
+            # A retained replay after a reload or restart: the event fired long ago and
+            # must not fire again, but the last_result sensor would otherwise come back
+            # as unknown. Restore it from the newest replayed motion result.
+            current = robot.last_result
+            if current is None or (current.finished_at or 0) < result.finished_at:
+                robot.last_result = LastResult(
+                    outcome=TaskOutcome(str(result.status)),
+                    task_id=result.id,
+                    task=result.task,
+                    code=result.code,
+                    reason=result.reason,
+                    data=dict(result.data),
+                    finished_at=result.finished_at,
+                    duration_ms=result.duration_ms,
+                    synthetic=False,
+                )
         self._dispatch_updated(robot_id)
 
     # ----------------------------------------------------------------- registry callbacks

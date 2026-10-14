@@ -165,6 +165,11 @@ Choices made while adding the failure-modes table and its check, the safety and 
 
 - 2026-10-14: `wsl --shutdown` did not recover WSL (the WSL service itself was hung and its processes from the previous day stayed alive), so with Jonny present and accepting two UAC prompts the WSL service and VM processes were force-stopped and the service started again from an elevated PowerShell; `wsl --status` answered immediately afterwards. Reason: the only non-elevated route had been tried and failed.
 
+- 2026-10-14: Session takeover is also recognised from a broker-sent DISCONNECT with any reason code that arrives within 10 s of a successful connect (`TAKEOVER_SUSPECT_S`), because the live Mosquitto 2.1.2 add-on evicts the older holder of a duplicated client id with reason code 0 rather than 142; the first live run showed two nodes flapping every 2 s with no back-off and no exit. Reason: the design's exit-after-three-takeovers safeguard was inert on the broker the project targets.
+- 2026-10-14: A retained result replayed after a reload or restart restores the `last_result` sensor (newest motion result) without firing a second event, because the first live run left `last_result` at unknown after every options reload. Reason: the exactly-once event rule stands, but the entity should show the last known outcome.
+- 2026-10-14: The ROS log handler calls a separate rclpy logger method per severity from its own line, because rclpy caches logging features per call site and raised "Logger severity cannot be changed between calls" on the first live run, losing the message. Reason: a defect only visible under real rclpy.
+- 2026-10-14: The end-to-end checklist was run against the live Home Assistant with the two fake arms in Docker; results are in `tools/e2e_checklist.md`. Measured command-to-ack round trip: median 49 ms, p95 59 ms (Docker Desktop on the Windows PC to the Mosquitto add-on and back).
+
 ## Open questions for Jonny (asked one at a time)
 
 Each is asked on its own, in plain chat with numbered options, as the working agreement requires. Until answered, the proposed default is what the code and documents do.

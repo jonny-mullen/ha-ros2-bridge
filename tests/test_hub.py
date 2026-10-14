@@ -525,6 +525,42 @@ async def test_session_change_does_not_lose_a_command_whose_result_arrived(
     assert str(hub.robots[ROBOT_ID].last_result.outcome) == "succeeded"
 
 
+async def test_retained_result_replay_restores_last_result_without_an_event(
+    hass: HomeAssistant,
+    hub: BridgeHub,
+    complete_hub_start: Callable[[BridgeHub], Awaitable[None]],
+) -> None:
+    """After a reload the retained result comes back: no second event, but last_result is restored."""
+    results = async_capture_events(hass, EVENT_TASK_RESULT)
+    await _announce_online(hass)
+    task_id = await _send_and_accept(hass, hub)
+    now = hub.now
+    payload = result_payload(id=task_id, task="reset", started_at=now - 1500, finished_at=now)
+    fire_robot_message(hass, f"task/{task_id}/result", payload, retain=True)
+    await hass.async_block_till_done()
+    assert len(results) == 1
+    assert hub.robots[ROBOT_ID].last_result is not None
+
+    # An options reload: a fresh hub with fresh subscriptions, so the broker replays the
+    # retained announce, availability and result (HA's client only delivers a retained
+    # message once per subscription, which is why the reload is needed here too).
+    entry = hub.entry
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    reloaded: BridgeHub = entry.runtime_data
+    assert reloaded is not hub
+    await complete_hub_start(reloaded)
+    await _announce_online(hass)
+    assert reloaded.robots[ROBOT_ID].last_result is None, "the sensor would read unknown"
+    fire_robot_message(hass, f"task/{task_id}/result", payload, retain=True)
+    await hass.async_block_till_done()
+    assert len(results) == 1, "a replayed result never fires a second event"
+    restored = reloaded.robots[ROBOT_ID].last_result
+    assert restored is not None and restored.task_id == task_id
+    assert str(restored.outcome) == "succeeded" and restored.synthetic is False
+    assert reloaded.registry.counters["replayed_results_ignored"] >= 1
+
+
 # --------------------------------------------------------------------------- heartbeat staleness
 
 

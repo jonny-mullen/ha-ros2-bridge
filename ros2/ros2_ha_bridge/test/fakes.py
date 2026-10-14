@@ -664,6 +664,19 @@ class FakeBroker:
             client, publish_will=True, reason_code=REASON_UNSPECIFIED_ERROR, from_server=False
         )
 
+    def evict(self, client_id: str, *, reason_code: int = REASON_SUCCESS) -> None:
+        """Broker-initiated DISCONNECT of a connected client; its will is published.
+
+        This is how Mosquitto 2.1 removes the older holder of a duplicated client
+        id: a plain broker-sent DISCONNECT with reason code 0 rather than 142.
+        """
+        with self._lock:
+            session = self._sessions.get(client_id)
+            if session is None:
+                raise KeyError(f'no connected client {client_id!r}')
+            client = session.client
+        self._disconnect(client, publish_will=True, reason_code=reason_code, from_server=True)
+
     def redeliver(self, record: PublishRecord) -> None:
         """Deliver an earlier publish again with ``dup=True`` (a publisher-side QoS 1 resend)."""
         with self._lock:
