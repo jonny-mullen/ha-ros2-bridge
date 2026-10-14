@@ -850,6 +850,22 @@ def test_unserialisable_result_data_is_replaced_and_the_result_still_goes_out(
     assert any('not JSON-encodable' in r.getMessage() for r in caplog.records)
 
 
+def test_oversize_result_data_is_replaced_so_the_result_fits_the_wire_limit(
+    harness: Harness, schema_validator: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A verbose plugin must not push the one result over the 16 KiB message limit."""
+    caplog.set_level(logging.WARNING, logger=LOGGER)
+    command, _ = harness.start(MOVE_TO, {'pose': 'home'})
+    data = {'trajectory': 'x' * 20_000}
+    harness.executor.finish(command.id, 'succeeded', 'ok', 'Moved', data)
+    assert len(harness.results) == 1, 'the result reached the wire'
+    result = harness.results[0].payload
+    schema_validator.assert_valid('result', result)
+    assert result['data'] == {'truncated': True, 'bytes': len(json.dumps(data).encode())}
+    assert len(json.dumps(result).encode('utf-8')) < 16384
+    assert any('over 8192' in r.getMessage() for r in caplog.records)
+
+
 def test_encodable_result_data_passes_through_untouched(harness: Harness) -> None:
     data = {
         'moveit_error_code': -12,

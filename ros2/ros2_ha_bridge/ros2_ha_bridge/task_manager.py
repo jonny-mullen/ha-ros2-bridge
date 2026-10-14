@@ -129,6 +129,11 @@ PostFn = Callable[[Callable[[], None]], None]
 _LOGGER_NAME = 'ros2_ha_bridge.task_manager'
 #: How much of an unserialisable ``data`` repr survives into the sanitised result.
 _UNSERIALISABLE_REPR_CHARS = 512
+#: Largest ``data`` object a result may carry on the wire. The whole result must stay under
+#: the contract's 16 KiB message limit or Home Assistant drops it unparsed, which would
+#: break the promise of exactly one result per accepted task; half the limit leaves room
+#: for the other fields and a long reason.
+_MAX_RESULT_DATA_BYTES = 8192
 #: Surrogate code points, the one thing a Python str can hold that UTF-8 cannot encode.
 _SURROGATE_RE = re.compile('[\ud800-\udfff]')
 
@@ -1012,6 +1017,11 @@ def _encodable(data: Mapping[str, Any]) -> bool:
     return True
 
 
+def _encoded_size(data: Mapping[str, Any]) -> int:
+    """Size in bytes of ``data`` on the wire; only called once :func:`_encodable` is true."""
+    return len(json.dumps(dict(data), ensure_ascii=False, allow_nan=False).encode('utf-8'))
+
+
 def _sanitise_result(result: TaskResult, log: logging.Logger, task_id: str) -> TaskResult:
     """Keep a sloppy executor from producing a result the schema or the encoder would reject.
 
@@ -1043,6 +1053,9 @@ def _sanitise_result(result: TaskResult, log: logging.Logger, task_id: str) -> T
     elif not _encodable(data):
         problems.append('data (not JSON-encodable)')
         data = {'unserialisable': repr(dict(data))[:_UNSERIALISABLE_REPR_CHARS]}
+    elif (size := _encoded_size(data)) > _MAX_RESULT_DATA_BYTES:
+        problems.append(f'data ({size} bytes, over {_MAX_RESULT_DATA_BYTES})')
+        data = {'truncated': True, 'bytes': size}
     if not problems:
         return result
     log.warning('task %s: executor result had invalid %s; sanitised', task_id, ', '.join(problems))
