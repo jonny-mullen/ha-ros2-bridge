@@ -277,7 +277,60 @@ def test_mqtt_defaults_in_the_parameter_table_match_the_link() -> None:
     assert defaults['mqtt.reconnect_min_s'] == ml.DEFAULT_RECONNECT_MIN_S
     assert defaults['mqtt.reconnect_max_s'] == ml.DEFAULT_RECONNECT_MAX_S
     assert defaults['mqtt.takeover_exit_after'] == ml.DEFAULT_TAKEOVER_EXIT_AFTER
+    assert defaults['mqtt.takeover_suspect_s'] == ml.TAKEOVER_SUSPECT_S
+    assert defaults['mqtt.takeover_window_s'] == ml.TAKEOVER_WINDOW_S
     assert defaults['mqtt.inbound_queue_max'] == ml.DEFAULT_INBOUND_QUEUE_MAX
+    assert defaults['mqtt.offline_wait_s'] == ml.DEFAULT_OFFLINE_WAIT_S
+    assert defaults['logging.warn_interval_s'] == ml.DEFAULT_WARN_INTERVAL_S
+    assert defaults['watchdog.ros_topic'] == bn.HA_LINK_TOPIC == '~/ha_link'
+
+
+def test_tunables_that_were_constants_reach_their_modules(rig: Rig) -> None:
+    """Each newer parameter is threaded through to the object that uses it."""
+    from rclpy.qos import DurabilityPolicy
+    from std_msgs.msg import Bool, String
+
+    node = rig.node(
+        start=False,
+        **{
+            'mqtt.takeover_suspect_s': 0.0,
+            'mqtt.takeover_window_s': 60.0,
+            'mqtt.offline_wait_s': 0.5,
+            'logging.warn_interval_s': 0.0,
+            'command.dedupe_write_interval_s': 0.0,
+            'watchdog.ros_topic': '~/link_to_ha',
+            'mirror.ros_topic': '~/from_mqtt',
+            'mirror.ros_queue_depth': 3,
+        },
+    )
+    link_config = node.link.config
+    assert (link_config.takeover_suspect_s, link_config.takeover_window_s) == (0.0, 60.0)
+    assert link_config.warn_interval_s == 0.0
+    assert node.settings.mqtt.offline_wait_s == 0.5
+    assert node._authoriser.config.warn_interval_s == 0.0
+    assert node._dedupe.min_write_interval_s == 0.0
+    # Private names (``~/``) resolve under the node name; a bare name would sit at the namespace root.
+    link_topic = f'/{node.get_name()}/link_to_ha'
+    mirror_topic = f'/{node.get_name()}/from_mqtt'
+    assert rig.spin_until(
+        lambda: (
+            bool(node.get_publishers_info_by_topic(link_topic))
+            and bool(node.get_publishers_info_by_topic(mirror_topic))
+        )
+    ), 'the two node-owned ROS topics carry the configured names'
+    link_info = node.get_publishers_info_by_topic(link_topic)[0]
+    mirror_info = node.get_publishers_info_by_topic(mirror_topic)[0]
+    assert link_info.topic_type == 'std_msgs/msg/Bool'
+    assert mirror_info.topic_type == 'std_msgs/msg/String'
+    # Graph endpoint info carries no history depth (DDS discovery omits it), so the depth
+    # is read from the publishers themselves; durability does travel and is checked both ways.
+    assert node._mqtt_in.qos_profile.depth == 3, 'mirror.ros_queue_depth'
+    assert node._ha_link_publisher.qos_profile.depth == 1, 'the HA link QoS is fixed'
+    assert node._ha_link_publisher.qos_profile.durability == DurabilityPolicy.TRANSIENT_LOCAL
+    assert link_info.qos_profile.durability == DurabilityPolicy.TRANSIENT_LOCAL
+    assert isinstance(node._mqtt_in.msg_type(), String) and isinstance(
+        node._ha_link_publisher.msg_type(), Bool
+    )
 
 
 @pytest.mark.parametrize(
@@ -476,11 +529,15 @@ def test_reset_publishes_joint_telemetry_and_the_announce_describes_it(
     assert len(joints) >= 2, 'a 0.3 s reset at 10 Hz feedback and 20 Hz telemetry'
     for payload in joints:
         schema_validator.assert_valid('joints', payload)
-        assert len(payload['positions']) == 7 and payload['velocities'] is None
+        assert len(payload['positions']) == 7 and len(payload['velocities']) == 7
         assert payload['session'] == node.session and payload['instance'] == node.instance
     seqs = [payload['seq'] for payload in joints]
     assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), 'seq increases per publication'
     assert joints[-1]['positions'] == [0.0] * 7, 'the final pose always reaches the wire'
+    assert joints[-1]['velocities'] == [0.0] * 7, 'at rest once the motion has ended'
+    assert any(payload['velocities'] != [0.0] * 7 for payload in joints[:-1]), (
+        'the fake reports its rate (degrees per second) while it moves'
+    )
     assert node.joints_publisher.seq == seqs[-1]
     assert validate_everything(rig, node, schema_validator) > 5
 

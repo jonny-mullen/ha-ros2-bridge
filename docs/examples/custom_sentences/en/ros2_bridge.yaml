@@ -13,7 +13,7 @@
 #         name ("Left arm") or by the device name you gave it in Home Assistant.
 #   area  the area whose robot is meant. Without a name or area the robot is taken from
 #         the area of the satellite that heard you, and failing that the only robot there
-#         is. Anything ambiguous is answered with "Which arm do you mean?".
+#         is. Anything ambiguous is answered with "Which robot do you mean?".
 #
 # All three lists are wildcards, so any task or robot name works without editing this
 # file. A task that needs parameters (for example move_to) cannot be started by voice;

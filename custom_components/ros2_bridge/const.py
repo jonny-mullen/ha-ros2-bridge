@@ -36,6 +36,25 @@ CONF_RESULT_TIMEOUT_MARGIN_S: Final = "result_timeout_margin_s"
 CONF_MAX_PENDING_PER_ROBOT: Final = "max_pending_per_robot"
 CONF_HEARTBEAT_UNAVAILABLE_AFTER_S: Final = "heartbeat_unavailable_after_s"
 CONF_MIRROR_ENTITIES: Final = "mirror_entities"
+#: Added 2026-10-14 (towards 0.2.0) so that nothing is tuned for one site only.
+CONF_MIRROR_EXTRA_ATTRIBUTES: Final = "mirror_extra_attributes"
+CONF_INTENT_ACK_WAIT_S: Final = "intent_ack_wait_s"
+CONF_JOINT_MOVING_THRESHOLD: Final = "joint_moving_threshold"
+CONF_JOINT_MOVING_HOLD_S: Final = "joint_moving_hold_s"
+#: The advanced (collapsed) section of the options form: timings the node side shares
+#: and the heuristics behind two repairs.
+CONF_ACK_EXPIRY_S: Final = "ack_expiry_s"
+CONF_RESULT_EXPIRY_S: Final = "result_expiry_s"
+CONF_REPLAY_SETTLE_S: Final = "replay_settle_s"
+CONF_SESSION_CHANGE_GRACE_S: Final = "session_change_grace_s"
+CONF_FEEDBACK_THROTTLE_MS: Final = "feedback_throttle_ms"
+CONF_HEARTBEAT_STALE_INTERVALS: Final = "heartbeat_stale_intervals"
+CONF_CLOCK_SKEW_WARN_MS: Final = "clock_skew_warn_ms"
+CONF_DUPLICATE_SESSION_CHANGES: Final = "duplicate_session_changes"
+CONF_DUPLICATE_SESSION_WINDOW_S: Final = "duplicate_session_window_s"
+CONF_DUPLICATE_QUIET_S: Final = "duplicate_quiet_s"
+#: The key of the collapsed section in the options form (``strings.json`` ``sections``).
+SECTION_ADVANCED: Final = "advanced"
 
 DEFAULT_TOPIC_PREFIX: Final = "ros2_bridge"
 DEFAULT_SHARED_SECRET: Final = ""
@@ -46,8 +65,53 @@ DEFAULT_RESULT_TIMEOUT_MARGIN_S: Final = 10
 DEFAULT_MAX_PENDING_PER_ROBOT: Final = 16
 DEFAULT_HEARTBEAT_UNAVAILABLE_AFTER_S: Final = 30
 DEFAULT_MIRROR_ENTITIES: Final[tuple[str, ...]] = ()
+#: Attribute names appended to ``sensors_out.SENSOR_ATTRIBUTE_ALLOWLIST``; none by default.
+DEFAULT_MIRROR_EXTRA_ATTRIBUTES: Final[tuple[str, ...]] = ()
+#: Upper bound on how long a voice command waits for the acknowledgement (seconds).
+DEFAULT_INTENT_ACK_WAIT_S: Final = 1.5
+#: ``0`` means the announced unit's own default (``JOINT_MOVING_DEFAULT_THRESHOLDS``).
+DEFAULT_JOINT_MOVING_THRESHOLD: Final = 0.0
+#: How long one joints payload's ``moving`` verdict stands with no newer payload (seconds);
+#: ``0`` means two publication intervals of the announced rate, never less than one
+#: housekeeping tick (``hub._moving_hold_ms``).
+DEFAULT_JOINT_MOVING_HOLD_S: Final = 0.0
+#: Node defaults for ``reply.ack_expiry_s`` and ``reply.result_expiry_s`` (seconds); the
+#: options must equal what the node is configured with.
+DEFAULT_ACK_EXPIRY_S: Final = 120
+DEFAULT_RESULT_EXPIRY_S: Final = 300
+#: Quiet period after ``hub.ready`` and ``mqtt_connected`` before the first reconciliation.
+DEFAULT_REPLAY_SETTLE_S: Final = 3
+#: Grace after a robot's ``session`` changes before its outstanding commands are reconciled.
+DEFAULT_SESSION_CHANGE_GRACE_S: Final = 1
+#: Feedback writes to the state sensor are limited to one per robot per this many ms.
+DEFAULT_FEEDBACK_THROTTLE_MS: Final = 500
+#: A robot heartbeat is stale after this many announced intervals without one.
+DEFAULT_HEARTBEAT_STALE_INTERVALS: Final = 3
+#: An ack whose ``clock_skew_ms`` magnitude reaches this opens the ``clock_skew`` repair.
+DEFAULT_CLOCK_SKEW_WARN_MS: Final = 1000
+#: ``duplicate_robot_id`` heuristics: more than this many session changes in the window.
+DEFAULT_DUPLICATE_SESSION_CHANGES: Final = 3
+DEFAULT_DUPLICATE_SESSION_WINDOW_S: Final = 300
+#: ``duplicate_robot_id`` closes after this many quiet seconds.
+DEFAULT_DUPLICATE_QUIET_S: Final = 600
+
+#: The options shown in the collapsed advanced section, in form order.
+ADVANCED_OPTIONS: Final[tuple[str, ...]] = (
+    CONF_ACK_EXPIRY_S,
+    CONF_RESULT_EXPIRY_S,
+    CONF_REPLAY_SETTLE_S,
+    CONF_SESSION_CHANGE_GRACE_S,
+    CONF_FEEDBACK_THROTTLE_MS,
+    CONF_HEARTBEAT_STALE_INTERVALS,
+    CONF_CLOCK_SKEW_WARN_MS,
+    CONF_DUPLICATE_SESSION_CHANGES,
+    CONF_DUPLICATE_SESSION_WINDOW_S,
+    CONF_DUPLICATE_QUIET_S,
+)
 
 #: Every option with its default, for the options flow and for ``HubOptions.from_mapping``.
+#: The document is flat; the options form nests ``ADVANCED_OPTIONS`` under
+#: ``SECTION_ADVANCED`` for display only.
 DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_TOPIC_PREFIX: DEFAULT_TOPIC_PREFIX,
     CONF_SHARED_SECRET: DEFAULT_SHARED_SECRET,
@@ -58,37 +122,37 @@ DEFAULT_OPTIONS: Final[dict[str, Any]] = {
     CONF_MAX_PENDING_PER_ROBOT: DEFAULT_MAX_PENDING_PER_ROBOT,
     CONF_HEARTBEAT_UNAVAILABLE_AFTER_S: DEFAULT_HEARTBEAT_UNAVAILABLE_AFTER_S,
     CONF_MIRROR_ENTITIES: list(DEFAULT_MIRROR_ENTITIES),
+    CONF_MIRROR_EXTRA_ATTRIBUTES: list(DEFAULT_MIRROR_EXTRA_ATTRIBUTES),
+    CONF_INTENT_ACK_WAIT_S: DEFAULT_INTENT_ACK_WAIT_S,
+    CONF_JOINT_MOVING_THRESHOLD: DEFAULT_JOINT_MOVING_THRESHOLD,
+    CONF_JOINT_MOVING_HOLD_S: DEFAULT_JOINT_MOVING_HOLD_S,
+    CONF_ACK_EXPIRY_S: DEFAULT_ACK_EXPIRY_S,
+    CONF_RESULT_EXPIRY_S: DEFAULT_RESULT_EXPIRY_S,
+    CONF_REPLAY_SETTLE_S: DEFAULT_REPLAY_SETTLE_S,
+    CONF_SESSION_CHANGE_GRACE_S: DEFAULT_SESSION_CHANGE_GRACE_S,
+    CONF_FEEDBACK_THROTTLE_MS: DEFAULT_FEEDBACK_THROTTLE_MS,
+    CONF_HEARTBEAT_STALE_INTERVALS: DEFAULT_HEARTBEAT_STALE_INTERVALS,
+    CONF_CLOCK_SKEW_WARN_MS: DEFAULT_CLOCK_SKEW_WARN_MS,
+    CONF_DUPLICATE_SESSION_CHANGES: DEFAULT_DUPLICATE_SESSION_CHANGES,
+    CONF_DUPLICATE_SESSION_WINDOW_S: DEFAULT_DUPLICATE_SESSION_WINDOW_S,
+    CONF_DUPLICATE_QUIET_S: DEFAULT_DUPLICATE_QUIET_S,
 }
 
-# --------------------------------------------------------------------------- timing
+# --------------------------------------------------------------------------- fixed timing
+# These are not options: they are either contract-level timings both halves assume or
+# bounds that protect the event loop, the Store and the broker (docs/configuration.md,
+# "Fixed values").
 
-#: Quiet period after ``hub.ready`` and ``mqtt_connected`` before the first reconciliation.
-REPLAY_SETTLE_S: Final = 3
-#: Grace after a robot's ``session`` changes before its outstanding commands are reconciled.
-SESSION_CHANGE_GRACE_S: Final = 1
 #: Upper bound on waiting for the ack and result subscriptions to complete.
 READY_TIMEOUT_S: Final = 10
-#: Period of the hub's housekeeping timer (deadlines, staleness, grace, pruning).
+#: Period of the hub's housekeeping timer (deadlines, staleness, grace, pruning), which is
+#: also the resolution at which every timeout is decided.
 HOUSEKEEPING_INTERVAL_S: Final = 1
-#: Feedback writes to the state sensor are limited to one per robot per this many ms.
-FEEDBACK_THROTTLE_MS: Final = 500
-#: A robot heartbeat is stale after this many announced intervals without one.
-HEARTBEAT_STALE_INTERVALS: Final = 3
 #: Message Expiry Interval of the HA heartbeat (seconds).
 HA_HEARTBEAT_EXPIRY_S: Final = 5
-#: Node defaults for ``reply.ack_expiry_s`` and ``reply.result_expiry_s`` (seconds).
-DEFAULT_ACK_EXPIRY_S: Final = 120
-DEFAULT_RESULT_EXPIRY_S: Final = 300
 #: Size limits on the bytes actually received (16 KiB per message, 64 KiB for announce).
 MAX_PAYLOAD_BYTES: Final = 16 * 1024
 MAX_ANNOUNCE_BYTES: Final = 64 * 1024
-#: ``duplicate_robot_id`` heuristics: more than this many session changes in the window.
-DUPLICATE_SESSION_CHANGES: Final = 3
-DUPLICATE_SESSION_WINDOW_S: Final = 300
-#: ``duplicate_robot_id`` closes after this many quiet seconds.
-DUPLICATE_QUIET_S: Final = 600
-#: An ack whose ``clock_skew_ms`` magnitude reaches this opens the ``clock_skew`` repair.
-CLOCK_SKEW_WARN_MS: Final = 1000
 #: How many registry entries the diagnostics snapshot lists.
 DIAGNOSTICS_RECENT_COMMANDS: Final = 50
 #: Delay of the debounced Store write used for housekeeping-only changes (seconds).
@@ -339,6 +403,15 @@ class JointUnit(StrEnum):
 
 #: The unit of measurement a joint sensor shows for each announced unit.
 JOINT_UNIT_SYMBOLS: Final[dict[JointUnit, str]] = {JointUnit.DEG: "°", JointUnit.RAD: "rad"}
+#: Suggested display precision of a joint sensor per unit (0.1 deg, 0.001 rad); the
+#: entity's own settings dialog overrides it per entity.
+JOINT_DISPLAY_PRECISION: Final[dict[JointUnit, int]] = {JointUnit.DEG: 1, JointUnit.RAD: 3}
+#: ``joint_moving_threshold`` when the option is ``0``: the node's ``telemetry.joints_min_delta``
+#: defaults, so a movement the node thought worth publishing counts as moving here.
+JOINT_MOVING_DEFAULT_THRESHOLDS: Final[dict[JointUnit, float]] = {
+    JointUnit.DEG: 0.5,
+    JointUnit.RAD: 0.01,
+}
 
 
 class ResultStatus(StrEnum):

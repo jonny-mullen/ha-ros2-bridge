@@ -22,8 +22,12 @@
 #     in the announced order and carry the joint name after the number. Add or delete gauges to match.
 #   - Gauge limits are static values copied from the announced limits (fake executor: -170 to 170
 #     degrees, j4 and j6 -120 to 120). Each joint sensor carries its own limit_min and limit_max
-#     attributes. Change min, max and the amber bands (segments) to match your arm, and the history
-#     graph's axis. A robot that announces no limits needs a range of your choosing.
+#     attributes (null when the robot announces no limits, as the MoveIt executor does) next to the
+#     reported velocity and a moving flag. Change min, max and the amber bands (segments) to match
+#     your arm, and the history graph's axis. A gauge shows whatever number the sensor holds, so a
+#     robot in radians needs radian values throughout (for example -3.2 to 3.2), and a robot that
+#     announces no limits needs a range of your choosing (its URDF is the place to read it from).
+#     docs/dashboard.md, "Adapting it", walks a six-joint arm in radians through every change.
 #   - The task buttons press the button entities the integration creates (one per parameterless task
 #     plus Cancel task). The pose buttons call ros2_bridge.send_task with move_to and a pose name the
 #     fake executor accepts (pick, place, wave; reset returns home). Rename or remove them for a robot

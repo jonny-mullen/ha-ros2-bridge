@@ -19,8 +19,9 @@ runs on the ``SingleThreadedExecutor`` thread, drains the deque and dispatches
 each item. Commands go through the authoriser and the task manager, Home
 Assistant heartbeats feed the watchdog, HA's birth message schedules a
 re-announce after a random jitter, mirrored topics become ``std_msgs/String``
-envelopes on ``~/mqtt_in``, and a successful connect publishes the retained
-availability, announce and state. Joint telemetry (0.2.0): the executor's
+envelopes on ``mirror.ros_topic`` (``~/mqtt_in``), the HA link is latched on
+``watchdog.ros_topic`` (``~/ha_link``), and a successful connect publishes the
+retained availability, announce and state. Joint telemetry (0.2.0): the executor's
 ``ctx.report_joints`` calls arrive here through the same post, a
 :class:`~ros2_ha_bridge.joints_publisher.JointsPublisher` throttles them to
 ``telemetry.joints_rate_hz`` and the minimum delta, and the connect burst
@@ -39,9 +40,11 @@ executor's ``setup``, the announce size check, the TLS configuration) and
 raises :class:`~ros2_ha_bridge.parameters.ConfigError` for a fatal
 misconfiguration; :meth:`BridgeNode.start` opens the MQTT connection and arms
 the periodic timers; :meth:`BridgeNode.shutdown` runs the design's clean
-shutdown order (stop inbound, ``availability offline``, ``disconnect()``,
-``loop_stop()``, ``executor.shutdown()``, dedupe flush) and
-``destroy_node()`` finishes it. :func:`main` spins the node until
+shutdown order (stop inbound, ``availability offline`` waited for up to
+``mqtt.offline_wait_s``, ``disconnect()``, ``loop_stop()``,
+``executor.shutdown()``, dedupe flush) and ``destroy_node()`` finishes it;
+:func:`main` then gives the rclpy executor one second to wind down, so a
+supervisor's stop grace must exceed the sum. :func:`main` spins the node until
 :attr:`BridgeNode.exit_future` completes: a session takeover past
 ``mqtt.takeover_exit_after`` or a missing CONNACK within
 ``mqtt.connect_timeout_s`` ends the process with a non-zero status so the
@@ -132,7 +135,7 @@ from ros2_ha_bridge.ros_adapters import (
 )
 from ros2_ha_bridge.sensor_mirror import SensorMirror
 from ros2_ha_bridge.task_manager import TaskManager, TaskManagerSettings
-from ros2_ha_bridge.watchdog import TICK_S, Watchdog
+from ros2_ha_bridge.watchdog import DEFAULT_HA_LINK_TOPIC, TICK_S, Watchdog
 
 __all__ = [
     'DEFAULT_NODE_NAME',
@@ -148,16 +151,19 @@ __all__ = [
 
 #: Node name under ``ros2 run``; launch files set their own.
 DEFAULT_NODE_NAME = 'bridge_node'
-#: The latched ``std_msgs/Bool`` that mirrors the HA link.
-HA_LINK_TOPIC = '~/ha_link'
-#: Process exit statuses. Anything non-zero makes the launch file's respawn count a retry.
+#: Default name of the latched ``std_msgs/Bool`` that mirrors the HA link (``watchdog.ros_topic``).
+HA_LINK_TOPIC = DEFAULT_HA_LINK_TOPIC
+#: Process exit statuses (docs/install-ros2.md lists them). Anything non-zero makes the launch
+#: file's respawn count a retry.
 EXIT_OK = 0
 EXIT_CONFIG = 2
 EXIT_CONNECT_TIMEOUT = 3
 EXIT_TAKEOVER = 4
 
 _LOGGER_NAME = 'ros2_ha_bridge.bridge_node'
-_MQTT_IN_QUEUE_DEPTH = 10
+#: How long :func:`main` gives the rclpy executor to wind down after the node's own shutdown
+#: (fixed; documented next to ``mqtt.offline_wait_s`` so a supervisor's stop grace covers both).
+_EXECUTOR_SHUTDOWN_S = 1.0
 
 # rcl_interfaces ships no type information and is not in the mypy override list the
 # repository configures for rclpy, so the two message classes are fetched by name.
@@ -269,6 +275,7 @@ class BridgeNode(Node):  # type: ignore[misc]
             max_size=settings.command.dedupe_size,
             window_s=settings.command.dedupe_window_s,
             keep_on_load_ms=settings.command.keep_on_load_ms,
+            min_write_interval_s=settings.command.dedupe_write_interval_s,
             scheduler=self._scheduler,
         )
         if self._dedupe.loaded:
@@ -324,6 +331,7 @@ class BridgeNode(Node):  # type: ignore[misc]
                 clock_skew_tolerance_ms=settings.command.clock_skew_tolerance_ms,
                 task_timeout_cap_s=settings.command.task_timeout_cap_s,
                 retained_rejections_per_minute=settings.reply.retained_rejections_per_minute,
+                warn_interval_s=settings.logging_warn_interval_s,
             ),
             state_view=self._manager.gating_state,
             counters=self._counters,
@@ -338,11 +346,13 @@ class BridgeNode(Node):  # type: ignore[misc]
             max_payload_bytes=settings.mqtt.max_payload_bytes,
         )
         self._mqtt_in = self.create_publisher(
-            String, settings.mirror.ros_topic, _MQTT_IN_QUEUE_DEPTH
+            String, settings.mirror.ros_topic, settings.mirror.ros_queue_depth
         )
+        # The QoS is the latched contract of this topic (a late subscriber gets the current
+        # value); only the name is a parameter.
         self._ha_link_publisher = self.create_publisher(
             Bool,
-            HA_LINK_TOPIC,
+            settings.watchdog.ros_topic,
             QoSProfile(
                 depth=1,
                 history=HistoryPolicy.KEEP_LAST,
@@ -555,8 +565,11 @@ class BridgeNode(Node):  # type: ignore[misc]
             reconnect_min_s=mqtt.reconnect_min_s,
             reconnect_max_s=mqtt.reconnect_max_s,
             takeover_exit_after=mqtt.takeover_exit_after,
+            takeover_suspect_s=mqtt.takeover_suspect_s,
+            takeover_window_s=mqtt.takeover_window_s,
             max_payload_bytes=mqtt.max_payload_bytes,
             inbound_queue_max=mqtt.inbound_queue_max,
+            warn_interval_s=self.settings.logging_warn_interval_s,
         )
         subscriptions = [
             SubscriptionSpec(self._topics.cmd, 1, retain_as_published=True),
@@ -720,7 +733,7 @@ class BridgeNode(Node):  # type: ignore[misc]
             self._joints_publisher.close()
         self._watchdog.stop()
         self._manager.stop_health_polling()
-        self._link.shutdown()
+        self._link.shutdown(offline_wait_s=self.settings.mqtt.offline_wait_s)
         try:
             self._plugin.shutdown()
         except Exception:
@@ -1050,7 +1063,7 @@ def main(args: list[str] | None = None) -> int:
         finally:
             node.shutdown()
             executor.remove_node(node)
-            executor.shutdown(timeout_sec=1.0)
+            executor.shutdown(timeout_sec=_EXECUTOR_SHUTDOWN_S)
             node.destroy_node()
     finally:
         rclpy.try_shutdown()

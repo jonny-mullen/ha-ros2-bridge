@@ -434,6 +434,12 @@ class Robot:
     feedback: Feedback | None = None
     #: The latest accepted joints payload; ``None`` until one arrives for the announced block.
     joints: Joints | None = None
+    #: Per joint, whether the latest payload showed movement (``BridgeHub._handle_joints``);
+    #: ``None`` with no payload. Housekeeping clears every flag once ``joints_moving_until``
+    #: (a hub clock value, the ``joint_moving_hold_s`` option after the payload) has passed
+    #: without a newer payload.
+    joint_moving: tuple[bool, ...] | None = None
+    joints_moving_until: int | None = None
     last_ack: Ack | None = None
     last_result: LastResult | None = None
     #: Hub clock values of the session changes seen in the duplicate-detection window.

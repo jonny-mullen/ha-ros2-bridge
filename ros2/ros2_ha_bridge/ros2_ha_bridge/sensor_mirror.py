@@ -58,6 +58,7 @@ from ros2_ha_bridge.protocol import MAX_PAYLOAD_BYTES, MAX_TOPIC_BYTES
 
 __all__ = [
     'DEFAULT_AVAILABILITY_SUFFIX',
+    'DEFAULT_ROS_QUEUE_DEPTH',
     'DEFAULT_ROS_TOPIC',
     'ENCODING_BASE64',
     'ENCODING_UTF8',
@@ -80,6 +81,9 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_AVAILABILITY_SUFFIX = '/availability'
 #: ``mirror.ros_topic`` default; the node resolves ``~`` to its own namespace.
 DEFAULT_ROS_TOPIC = '~/mqtt_in'
+#: ``mirror.ros_queue_depth`` default: keep-last history depth of the ROS publisher, which is
+#: the only buffer between a chatty ``#`` filter and a slow ROS subscriber (DDS drops beyond it).
+DEFAULT_ROS_QUEUE_DEPTH = 10
 #: Mirror subscriptions are QoS 0 (the topic table: "as published", nothing to acknowledge).
 MIRROR_QOS = 0
 #: Values of the envelope's ``encoding`` key.

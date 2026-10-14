@@ -54,12 +54,23 @@
       reconnect_max_s: 30
       # Exit non-zero without a CONNACK within this many seconds; 0 waits for ever.
       connect_timeout_s: 0.0
-      # Exit non-zero after this many session takeovers within ten minutes; 0 never.
+      # Exit non-zero after this many session takeovers within takeover_window_s; 0 never.
       takeover_exit_after: 3
-      # Inbound size limit; larger messages are dropped unparsed.
+      # A broker-sent disconnect within this many seconds of connecting counts as a session
+      # takeover whatever its reason code (Mosquitto evicts the older holder of a client id
+      # with reason code 0, not 142); 0 leaves reason code 142 as the only signal.
+      takeover_suspect_s: 10.0
+      # Sliding window, in seconds, the takeover count (and the doubled reconnect delay) is
+      # measured over.
+      takeover_window_s: 600.0
+      # Inbound size limit; larger messages are dropped unparsed. Also bounds HA heartbeats
+      # and mirrored messages; Home Assistant's own limit stays at the contract's 16 KiB.
       max_payload_bytes: 16384
       # Bound of the inbound queue between the network thread and the node.
       inbound_queue_max: 256
+      # Seconds a clean stop waits for the retained availability "offline" to be acknowledged
+      # before relying on the will; 0 does not wait.
+      offline_wait_s: 2.0
     # Topic prefix shared with the HA integration; no slashes at the ends, no wildcards.
     topic_prefix: ros2_bridge
     # Home Assistant's birth and will topic; "online" triggers a re-announce.
@@ -67,6 +78,10 @@
     announce:
       # Re-announce after HA birth within a random delay up to this many seconds.
       jitter_s: 2.0
+    logging:
+      # Least spacing of the rate-limited WARN lines (oversize, queue full, retained command,
+      # invalid id, unauthorised command); 0 warns on every event.
+      warn_interval_s: 10.0
     # Executor plugin: an entry-point name or package.module:Class. (example: the fake)
     executor: fake
     # The three executor.* settings are written as dotted keys because "executor" is itself
@@ -92,6 +107,9 @@
       dedupe_window_s: 300.0
       # How many command ids are remembered at most.
       dedupe_size: 1024
+      # Least spacing between two rewrites of dedupe.json, which is also the window in which
+      # a crash can lose a newly accepted id; 0 writes at every accepted ack.
+      dedupe_write_interval_s: 1.0
       # Upper bound on any task timeout, announced or requested.
       task_timeout_cap_s: 600.0
     # Directory holding {robot.id}/dedupe.json; empty keeps the dedupe store in memory.
@@ -124,6 +142,9 @@
       mode: none
       # HA heartbeat silence that counts as link down; floor of 2.5 x the HA interval.
       timeout_s: 5.0
+      # Latched std_msgs/Bool ROS topic that mirrors the HA link (true while up); "~" is the
+      # node's own namespace.
+      ros_topic: ~/ha_link
     mirror:
       # MQTT topics or filters mirrored onto the ROS topic together with their availability.
       # Empty (the default) mirrors nothing. Uncomment to mirror, for example:
@@ -132,6 +153,9 @@
       availability_suffix: /availability
       # ROS topic (std_msgs/String envelopes) the mirrored messages are published on.
       ros_topic: ~/mqtt_in
+      # Keep-last history depth of that publisher; DDS drops beyond it when the ROS subscriber
+      # is slower than a chatty filter.
+      ros_queue_depth: 10
     fake:
       # Fake executor: how long reset, move_to and fail take.
       task_duration_s: 2.0

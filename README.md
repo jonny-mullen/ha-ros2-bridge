@@ -2,9 +2,9 @@
 
 Home Assistant and ROS 2, side by side, joined by MQTT. Home Assistant owns the sensors, dashboards, automations and voice; ROS 2 owns the robots. This repository ships both halves of the bridge and the written contract between them.
 
-**Status: 0.1.0, released 2026-10-14. The ROS 2 package passes `colcon test` in the Jazzy container, the Home Assistant integration passes its suite and hassfest, and the live end-to-end checklist was run against a Home Assistant 2026.10.1 instance with two fake arms in Docker (`tools/e2e_checklist.md`). Nothing here has moved a real arm; the MoveIt executor is experimental until the Isaac site rehearsal.**
+**Status: 0.1.0, released 2026-10-14. The ROS 2 package passes `colcon test` in the Jazzy container, the Home Assistant integration passes its suite and hassfest, and the live end-to-end checklist was run against a Home Assistant 2026.10.1 instance with two fake arms in Docker (`tools/e2e_checklist.md`). Nothing here has moved a real arm; the MoveIt executor is experimental until it has been rehearsed against a simulator or a real `move_group` (`docs/simulator_checklist.md`).**
 
-Towards 0.2.0 (unreleased, 2026-10-14): optional joint telemetry. The announce may describe a robot's joints, the node publishes their positions on a non-retained topic at up to 2 Hz, Home Assistant makes one sensor per joint, the fake executor simulates seven joints so a dashboard moves without hardware, and `docs/examples/dashboard.yaml` is a phone-first dashboard for the two fake arms (`docs/dashboard.md`). Not yet run end to end on a live instance.
+Towards 0.2.0 (unreleased, 2026-10-14): optional joint telemetry. The announce may describe a robot's joints, the node publishes their positions on a non-retained topic at up to 2 Hz, Home Assistant makes one sensor per joint (the position, with the reported velocity and a `moving` flag as attributes), the fake executor simulates seven joints so a dashboard moves without hardware, and `docs/examples/dashboard.yaml` is a phone-first dashboard for the two fake arms (`docs/dashboard.md`, with a worked example for adapting it to another robot). Not yet run end to end on a live instance. A tunables audit the same day exposed every remaining constant a site might need to change as a node parameter, a launch argument, a rig variable or an integration option, and documented the values that stay fixed on purpose (`docs/configuration.md`, `docs/install-ha.md`, `CHANGELOG.md`).
 
 ## What it is
 
@@ -20,14 +20,14 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 
 - **The ROS 2 node** (`bridge_node`) with the shipped `fake` executor: announce, availability by Last Will, retained state, heartbeat with counters, the contract's command handling in order (retained drop, size, UUID id, persisted dedupe, schema, robot id, optional HMAC, freshness, allowlist and params, state gating, executor), per-task retained acks and results with MQTT 5 expiry, pause and resume, task timeout with cancel grace and forced finish, the three watchdog modes, the sensor mirror onto `~/mqtt_in`, session takeover handling, TLS options, launch files for one robot and a fleet. The rclpy-free core and the contract tests run on native Windows Python; the rclpy and paho layers have their own tests for `colcon test` in the Jazzy container.
 - **A MoveIt 2 reference executor** (`ros2_ha_bridge/executors/moveit.py`): drives `/move_action` through an adapter and maps `MoveItErrorCodes` onto the result vocabulary. Unit-tested with a fake adapter only; it has not been run against a real `move_group` and is marked experimental.
-- **The Home Assistant integration** (`ros2_bridge`): config flow with MQTT discovery and prefix validation, options flow with reload, a push hub on eight wildcard subscriptions (the eighth, `{prefix}/+/joints`, since 0.2.0), a `CommandRegistry` backed by a Store so every command id ends in exactly one outcome across restarts and reloads, state, last-result and problem entities, a task-result event entity, one button per parameterless task plus cancel, the three actions with `wait: ack`, `result` or `none`, three bus events, two Assist intents, the normalised sensor republish, five repairs and redacted diagnostics. Test suite at 96 percent coverage (run through `tools/windows_test_shim` on this PC; natively on Ubuntu in CI).
+- **The Home Assistant integration** (`ros2_bridge`): config flow with MQTT discovery and prefix validation, options flow with reload, a push hub on eight wildcard subscriptions (the eighth, `{prefix}/+/joints`, since 0.2.0), a `CommandRegistry` backed by a Store so every command id ends in exactly one outcome across restarts and reloads, state, last-result and problem entities, a task-result event entity, one button per parameterless task plus cancel, the three actions with `wait: ack`, `result` or `none`, three bus events, two Assist intents, the normalised sensor republish, five repairs and redacted diagnostics. Test suite at 96 percent coverage (through `tools/windows_test_shim` on Windows; natively on Ubuntu in CI).
 - **The contract** (`contract/`) with its validator, the vendored-copy check and the HMAC vectors; both `protocol.py` copies produce identical canonical JSON and signatures.
-- **The rig** (`tools/`): a `ros:jazzy-ros-base` image, `compose.yaml` with two fake arms, a test runner, an optional local broker, an MQTT client shell, `clock_check.py` (round trip and clock offset against HA), `latency_probe.py` (command-to-ack latency and heartbeat jitter; argument parser and dry run verified) and the chaos check list.
+- **The rig** (`tools/`): a `ros:jazzy-ros-base` image, `compose.yaml` with two fake arms (any node parameter set through `ROS2_HA_BRIDGE_PARAM_*` variables or a mounted parameters file), a test runner, an optional local broker, an MQTT client shell, `clock_check.py` (round trip and clock offset against HA), `latency_probe.py` (command-to-ack latency and heartbeat jitter; argument parser and dry run verified) and the chaos check list.
 - **Documentation**: every page listed under "Documentation" below, including the failure-modes table whose rows name real test ids, checked by `scripts/check_failure_modes.py`.
 
 ## Not yet verified
 
-- **The MoveIt executor against real MoveIt and Isaac Sim.** Unit-tested with a fake adapter only; the simulator rehearsal at the Isaac site is pending (`docs/simulator_checklist.md`; interview decisions Q12, Q13, Q20).
+- **The MoveIt executor against real MoveIt and Isaac Sim.** Unit-tested with a fake adapter only; the simulator rehearsal is pending (`docs/simulator_checklist.md`; interview decisions Q12, Q13, Q20).
 - **Signed commands end to end on the live broker** (the HMAC second pass of checklist step 6), a topic-prefix change on a live instance, and the node-side `mirror.topics` subscription outside the unit tests.
 - **A HACS install from a tagged release and CI on GitHub**, because the public repository does not exist yet (decision log, open question (b)); and the Mosquitto add-on ACL finding reproduced on a live add-on (`docs/security.md`).
 - **A real Voice PE.** The voice check used Home Assistant's conversation service as a typed stand-in.
@@ -49,7 +49,7 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 - Request-response with ROS 2 action semantics over MQTT: goal, feedback, result, cancel, with a structured result code (for example `collision`, `no_trajectory`, `timeout`) and a human-readable reason.
 - A fast sensor path (ROS 2 subscribes to Zigbee2MQTT directly) and a normalised sensor path (HA republishes any entity in one canonical schema).
 - Executor plugin interface with a shipped fake executor for testing without hardware, and a MoveIt 2 reference executor for Isaac Sim or real arms.
-- Optional joint telemetry (towards 0.2.0): an announce may carry a `joints` block (unit, names, limits, rate); the node publishes positions on `{prefix}/{robot_id}/joints` (QoS 0, never retained, 5 s expiry, on change only, at most `telemetry.joints_rate_hz` per second); Home Assistant creates one sensor per joint with the limits as attributes and a documented recorder exclude; executors report positions through `BridgeContext.report_joints`. A phone-first example dashboard with gauges per joint (`docs/dashboard.md`).
+- Optional joint telemetry (towards 0.2.0): an announce may carry a `joints` block (unit, names, limits, rate); the node publishes positions on `{prefix}/{robot_id}/joints` (QoS 0, never retained, 5 s expiry, on change only, at most `telemetry.joints_rate_hz` per second); Home Assistant creates one sensor per joint with the limits, the reported velocity and a `moving` flag as attributes and a documented recorder exclude; executors report positions through `BridgeContext.report_joints`. A phone-first example dashboard with gauges per joint (`docs/dashboard.md`).
 - Application-layer authorisation in the node (UUID ids, allowlist, freshness window, dedupe, retained-command drop) and an optional shared-secret HMAC.
 - Apache-2.0, SPDX headers, CI on both halves, a contract test suite both must pass.
 
@@ -59,7 +59,7 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 LICENSE  README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md
 hacs.json  pyproject.toml  requirements_test.txt  .pre-commit-config.yaml  .editorconfig  .dockerignore
 .github/workflows/          ha.yml, ros2.yml, contract.yml, release.yml
-brand/                      empty until the HACS icon lands with the 0.1.0 release
+brand/                      reserved for the HACS icon (empty; 0.1.0 shipped without one)
 contract/                   README, schemas/, examples/{valid,invalid}/, hmac_vectors.json
 custom_components/ros2_bridge/
                             the Home Assistant integration (HACS): config_flow, hub, commands, store,
@@ -80,7 +80,7 @@ docs/                       the pages listed below, examples/ (automations, sent
 
 ## Running the checks
 
-From the repository root, with the project virtual environment's interpreter (`.venv` on the development PC; Python 3.12 or newer with `pytest`, `jsonschema`, `paho-mqtt`, `ruff` and `mypy`):
+From the repository root, with a virtual environment's interpreter (Python 3.12 or newer with `pytest`, `jsonschema`, `paho-mqtt`, `ruff` and `mypy`):
 
 ```text
 python scripts/validate_contract.py
@@ -108,14 +108,14 @@ Installing and configuring:
 
 - [docs/install-ha.md](docs/install-ha.md): the Home Assistant side: install, add, options, entities, actions, events, repairs, voice, removal.
 - [docs/install-ros2.md](docs/install-ros2.md): the ROS 2 side on Ubuntu 24.04 with Jazzy, as a service, and the Docker route.
-- [docs/configuration.md](docs/configuration.md): every node parameter with its default.
+- [docs/configuration.md](docs/configuration.md): every node parameter with its default, the launch arguments, the environment variables and the values that are fixed on purpose.
 - [docs/upgrading.md](docs/upgrading.md): upgrading either half, the schema and Store versioning rules, the Home Assistant churn watch-list, the ROS 2 distribution outlook.
 
 Using it:
 
 - [docs/sensors.md](docs/sensors.md): the fast and the normalised sensor paths, how a ROS 2 node reads them, and the joints path back into Home Assistant with its recorder exclude.
-- [docs/quick-start.md](docs/quick-start.md): both halves installed in an evening, a first task, how communication works, and testing without the Isaac site.
-- [docs/dashboard.md](docs/dashboard.md): the example Lovelace dashboard for the fake arms (`docs/examples/dashboard.yaml`): installing it, the views, where the gauge limits come from, adapting it to other robots.
+- [docs/quick-start.md](docs/quick-start.md): both halves installed in an evening, a first task, how communication works, and testing without a simulator or a real arm.
+- [docs/dashboard.md](docs/dashboard.md): the example Lovelace dashboard for the fake arms (`docs/examples/dashboard.yaml`): installing it, the views, where the gauge limits come from, adapting it to other robots with a worked example for a six-joint arm in radians.
 - [docs/assist.md](docs/assist.md): voice control with Assist, the sentences, the replies and their limits.
 - [docs/examples/](docs/examples/): example automations, a sentence-trigger automation, the custom sentences file and the dashboard.
 - [docs/troubleshooting.md](docs/troubleshooting.md): symptom to cause, rejection codes, repairs, diagnostics, watching the bus, logs.

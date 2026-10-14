@@ -14,14 +14,18 @@ Joints (0.2.0): the fake simulates a seven-joint arm, ``j1`` to ``j7`` in
 degrees, limited to [-170, 170] except ``j4`` and ``j6`` at [-120, 120]. It
 starts at the ``home`` pose (all zero) and keeps its positions across tasks.
 ``reset`` and ``move_to`` interpolate linearly from the current positions to
-the target pose over ``task_duration_s``, reporting positions through
-``ctx.report_joints`` once at ``setup``, on every feedback tick
+the target pose over ``task_duration_s``, reporting positions and velocities
+through ``ctx.report_joints`` once at ``setup``, on every feedback tick
 (``1 / feedback_hz`` seconds) and at the end of every motion; ``wait`` holds;
 ``fail`` moves halfway towards the ``pick`` pose and then aborts; ``pause``
 freezes the positions where they are and ``resume`` continues from there; a
-cancel, ``stop`` or ``stop_and_hold`` freezes them where they are. The named
-poses are ``home``, ``pick``, ``place`` and ``wave``; ``move_to`` offers them
-as an enum and refuses any other name.
+cancel, ``stop`` or ``stop_and_hold`` freezes them where they are. The
+velocities are the derivative of that interpolation, in degrees per second:
+``(target - start) * motion_fraction / task_duration_s`` per joint while a
+motion runs, and zero whenever the arm holds, is paused, is frozen or has
+arrived, so the final report of every motion carries zeros. The named poses
+are ``home``, ``pick``, ``place`` and ``wave``; ``move_to`` offers them as an
+enum and refuses any other name.
 
 Task catalogue (the ``kind`` decides how the bridge gates it):
 
@@ -99,6 +103,7 @@ __all__ = [
     'POSES',
     'FakeExecutor',
     'interpolate',
+    'velocity',
 ]
 
 #: The entry-point name this executor is registered under (``executor: fake``).
@@ -223,6 +228,26 @@ def interpolate(
     return tuple(round(a + (b - a) * fraction, 6) for a, b in zip(start, target, strict=True))
 
 
+def velocity(
+    start: Sequence[float], target: Sequence[float], fraction: float, duration_s: float
+) -> tuple[float, ...]:
+    """The derivative of :func:`interpolate` over a motion that covers ``fraction`` of the way
+    from ``start`` to ``target`` in ``duration_s`` seconds: constant per joint, in the joint
+    unit per second. Zero for a motion of no duration.
+    """
+    if duration_s <= 0:
+        return (0.0,) * len(start)
+    fraction = min(1.0, max(0.0, fraction))
+    return tuple(
+        round((b - a) * fraction / duration_s, 6) for a, b in zip(start, target, strict=True)
+    )
+
+
+def _still(count: int) -> tuple[float, ...]:
+    """Velocities of an arm that holds, is paused or frozen, or has arrived."""
+    return (0.0,) * count
+
+
 @dataclass
 class _Run:
     """One motion task in flight: its timers, its motion and what it will finish with."""
@@ -265,6 +290,7 @@ class FakeExecutor(TaskExecutor):
         #: Every reason ``stop_and_hold`` was called with, oldest first.
         self.hold_reasons: list[str] = []
         self._positions: tuple[float, ...] = POSES[HOME_POSE]
+        self._velocities: tuple[float, ...] = _still(len(JOINT_NAMES))
 
     # ------------------------------------------------------------------ TaskExecutor
 
@@ -393,6 +419,11 @@ class FakeExecutor(TaskExecutor):
         """The joints as last reported, in degrees, in :data:`JOINT_NAMES` order."""
         return self._positions
 
+    @property
+    def velocities(self) -> tuple[float, ...]:
+        """The joint velocities as last reported, in degrees per second; zeros when still."""
+        return self._velocities
+
     # ------------------------------------------------------------------ motion runs
 
     def _begin(
@@ -450,7 +481,7 @@ class FakeExecutor(TaskExecutor):
             return
         elapsed = self._elapsed(run)
         progress = min(1.0, elapsed / run.duration_s) if run.duration_s > 0 else None
-        self._move_to(self._positions_at(run))
+        self._move_to(self._positions_at(run), self._velocities_at(run))
         run.handle.feedback(progress, 'executing', f'{elapsed:.1f} of {run.duration_s:g} s')
         run.ticker = self._scheduler().call_later(
             1.0 / self.feedback_hz, lambda: self._tick(task_id)
@@ -481,23 +512,35 @@ class FakeExecutor(TaskExecutor):
             run.start_positions, run.target_positions, progress * run.motion_fraction
         )
 
+    def _velocities_at(self, run: _Run) -> tuple[float, ...]:
+        """The joint velocities now: the motion's constant rate, or zeros once it holds or ends."""
+        if run.target_positions is None or run.paused:
+            return _still(len(self._positions))
+        if run.duration_s <= 0 or self._elapsed(run) >= run.duration_s:
+            return _still(len(self._positions))
+        return velocity(
+            run.start_positions, run.target_positions, run.motion_fraction, run.duration_s
+        )
+
     def _arrive(self, run: _Run) -> None:
-        """Put the joints where ``run`` ends and report them."""
+        """Put the joints where ``run`` ends and report them, at rest."""
         if run.target_positions is not None:
             self._move_to(
-                interpolate(run.start_positions, run.target_positions, run.motion_fraction)
+                interpolate(run.start_positions, run.target_positions, run.motion_fraction),
+                _still(len(self._positions)),
             )
 
     def _freeze(self, run: _Run) -> None:
-        """Leave the joints where the motion was interrupted and report them."""
-        self._move_to(self._positions_at(run))
+        """Leave the joints where the motion was interrupted and report them, at rest."""
+        self._move_to(self._positions_at(run), _still(len(self._positions)))
 
-    def _move_to(self, positions: tuple[float, ...]) -> None:
+    def _move_to(self, positions: tuple[float, ...], velocities: tuple[float, ...]) -> None:
         self._positions = positions
+        self._velocities = velocities
         self._report_joints()
 
     def _report_joints(self) -> None:
-        self._context().report_joints(self._positions)
+        self._context().report_joints(self._positions, self._velocities)
 
     # ------------------------------------------------------------------ control tasks
 

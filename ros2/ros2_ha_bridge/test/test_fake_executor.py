@@ -35,6 +35,7 @@ from ros2_ha_bridge.executors.fake import (
     POSES,
     FakeExecutor,
     interpolate,
+    velocity,
 )
 from ros2_ha_bridge.protocol import AckPayload, Announce, AnnounceJoints, DecodedCommand
 from ros2_ha_bridge.task_manager import TaskManager
@@ -46,6 +47,8 @@ ROBOT = 'fake_arm'
 SESSION = '9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e'
 INSTANCE = 'robotpc:4123'
 PARAMETERS = {'fake.task_duration_s': 2.0, 'fake.feedback_hz': 2}
+#: The velocities of an arm at rest.
+STILL = (0.0,) * 7
 HOME = POSES['home']
 PICK = POSES['pick']
 
@@ -622,8 +625,8 @@ def test_joint_info_matches_the_contract_fixture() -> None:
 
 
 def test_setup_reports_the_home_pose_once(rig: Rig) -> None:
-    assert rig.joints == [(HOME, None, rig.clock.monotonic())]
-    assert rig.executor.positions == HOME
+    assert rig.joints == [(HOME, STILL, rig.clock.monotonic())]
+    assert rig.executor.positions == HOME and rig.executor.velocities == STILL
     assert rig.executor.joints() is JOINT_INFO
 
 
@@ -641,10 +644,59 @@ def test_move_to_interpolates_from_home_to_pick_over_the_duration(rig: Rig) -> N
     assert rig.result_of(command)['status'] == 'succeeded'
     assert rig.reported[-1] == PICK and rig.executor.positions == PICK
     assert rig.reported == [HOME] + [interpolate(HOME, PICK, f) for f in (0.25, 0.5, 0.75, 1.0)]
-    assert all(velocities is None for _, velocities, _ in rig.joints)
+    # Velocities are the derivative of the interpolation: constant while moving, zero at rest.
+    moving = tuple(v / 2 for v in PICK)
+    assert velocity(HOME, PICK, 1.0, 2.0) == moving
+    assert [velocities for _, velocities, _ in rig.joints] == [
+        STILL,
+        moving,
+        moving,
+        moving,
+        STILL,
+    ]
     assert [t - 1000.0 for _, _, t in rig.joints] == pytest.approx([0.0, 0.5, 1.0, 1.5, 2.0])
     # The feedback and the joint reports share the ticker, so neither is doubled.
     assert [f['progress'] for f in rig.feedbacks] == [0.25, 0.5, 0.75]
+
+
+def test_velocities_follow_the_motion_and_vanish_when_it_stops(rig: Rig) -> None:
+    assert velocity(HOME, PICK, 0.5, 2.0) == tuple(v / 4 for v in PICK), 'half the way in 2 s'
+    assert velocity(HOME, PICK, 1.0, 0.0) == STILL, 'no duration, no velocity'
+    assert velocity(PICK, HOME, 1.0, 4.0) == tuple(-v / 4 for v in PICK), 'signed, per joint'
+    # fail covers half the way to pick in task_duration_s, so it moves at a quarter of pick per s.
+    failing, _ = rig.run('fail', {'code': 'collision'})
+    rig.clock.advance(0.5)
+    assert rig.executor.velocities == velocity(HOME, PICK, FAIL_MOTION_FRACTION, 2.0)
+    rig.clock.advance(1.5)
+    assert rig.result_of(failing)['status'] == 'aborted'
+    assert rig.executor.velocities == STILL and rig.joints[-1][1] == STILL
+    # A pause freezes the arm: the frozen report and the whole pause carry zeros, and the
+    # resumed motion carries the original rate again.
+    start = rig.executor.positions
+    running, _ = rig.run('move_to', {'pose': 'place'})
+    rig.clock.advance(1)
+    moving = velocity(start, POSES['place'], 1.0, 2.0)
+    assert rig.executor.velocities == moving and moving != STILL
+    rig.run('pause')
+    assert rig.executor.velocities == STILL and rig.joints[-1][1] == STILL
+    rig.run('resume')
+    rig.clock.advance(0.5)
+    assert rig.executor.velocities == moving
+    rig.run('stop')
+    assert rig.result_of(running)['code'] == 'preempted'
+    assert rig.executor.velocities == STILL and rig.joints[-1][1] == STILL
+    # A holding task reports zeros on every tick, and a cancel leaves the arm at rest.
+    reports = len(rig.joints)
+    rig.run('wait', {'seconds': 1})
+    rig.clock.advance(1)
+    assert all(velocities == STILL for _, velocities, _ in rig.joints[reports:])
+    cancelled, _ = rig.run('move_to', {'pose': 'wave'})
+    rig.clock.advance(0.5)
+    assert rig.executor.velocities != STILL
+    rig.cancel()
+    assert rig.result_of(cancelled)['status'] == 'cancelled'
+    assert rig.executor.velocities == STILL and rig.joints[-1][1] == STILL
+    assert all(len(velocities or ()) == 7 for _, velocities, _ in rig.joints)
 
 
 def test_positions_persist_across_tasks_and_reset_returns_home(rig: Rig) -> None:

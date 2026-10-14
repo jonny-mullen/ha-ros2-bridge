@@ -46,10 +46,13 @@ from typing import Protocol
 from ros2_ha_bridge.clock import Clock, Scheduler, TimerHandle
 from ros2_ha_bridge.protocol import WATCHDOG_MODES, HaHeartbeat, HaLink, WatchdogMode
 
-__all__ = ['MIN_TIMEOUT_FACTOR', 'TICK_S', 'Watchdog', 'WatchdogTarget']
+__all__ = ['DEFAULT_HA_LINK_TOPIC', 'MIN_TIMEOUT_FACTOR', 'TICK_S', 'Watchdog', 'WatchdogTarget']
 
-#: Period of the watchdog tick (seconds).
+#: Period of the watchdog tick (seconds); detection latency is the timeout plus up to this.
 TICK_S = 0.5
+#: ``watchdog.ros_topic`` default: the latched ``std_msgs/Bool`` that mirrors the HA link
+#: (keep last 1, reliable, transient local; the node owns the publisher).
+DEFAULT_HA_LINK_TOPIC = '~/ha_link'
 #: ``timeout_s`` is clamped to at least this many HA heartbeat intervals.
 MIN_TIMEOUT_FACTOR = 2.5
 

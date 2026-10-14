@@ -134,7 +134,7 @@ source ~/bridge_ws/install/setup.bash
 ros2 launch ros2_ha_bridge bridge.launch.py params_file:=$HOME/arm_left.yaml
 ```
 
-The good line in the log is `connected to the MQTT broker as 'ros2_ha_bridge_arm_left'`. Within a few seconds the device "Left arm" appears under Settings, Devices and services, ROS 2 Bridge. One launch per robot, each with its own parameters file; `fleet.launch.py` starts several from one list.
+The good line in the log is `connected to the MQTT broker as 'ros2_ha_bridge_arm_left'`. Within a few seconds the device "Left arm" appears under Settings, Devices and services, ROS 2 Bridge. One launch per robot, each with its own parameters file; `fleet.launch.py` starts several from one list. `docs/install-ros2.md`, step 7, lists the launch arguments (parameters file, node name, namespace, log level and the respawn policy) and the fleet file format.
 
 ### Docker route (any PC with Docker)
 
@@ -156,6 +156,8 @@ docker compose logs -f arm1
 ```
 
 Service `arm1` announces as robot `fake_arm_1` ("Fake arm 1") and `arm2` as `fake_arm_2` ("Fake arm 2"). Within a few seconds both appear as devices under Settings, Devices and services, ROS 2 Bridge. `docker compose down` removes the arms and the network.
+
+Only the broker, the prefix and the two fake ids come from the environment (`.env`, and the per-service variables in `compose.yaml`). Any other parameter in `docs/configuration.md` (TLS, `watchdog.mode`, `mirror.topics`, `telemetry.joints_rate_hz`, `tasks.allow`) is set in one of two ways: an environment variable `ROS2_HA_BRIDGE_PARAM_<NAME>`, where `<NAME>` is the dotted parameter name upper-cased with each dot written as a double underscore (`ROS2_HA_BRIDGE_PARAM_WATCHDOG__MODE=inhibit_new`, `ROS2_HA_BRIDGE_PARAM_MQTT__TLS__ENABLED=true`; pass it with `-e` or add it to `.env` and the service in `compose.yaml`), or a parameters file mounted into the container and named with `ROS2_HA_BRIDGE_PARAMS_FILE`; `tools/README.md`, Run two fake arms, has both commands, and a TLS certificate named either way needs its own mount. The two secrets stay in their own variables and are refused by the generic one. The rig is for testing: it runs the fake executor only, and a container on its network cannot reach a `move_group`, so a robot machine uses the native route.
 
 ## 4. First task
 
@@ -193,7 +195,7 @@ A test convenience: the variable exported in step 6 keeps the password out of yo
 
 ### Joints and the dashboard
 
-Each fake arm announces seven joints (`j1` to `j7`, degrees), so each device also gets `sensor.fake_arm_1_joint_1_j1` to `sensor.fake_arm_1_joint_7_j7`, updated at up to 2 Hz while a task moves them and holding between tasks; each carries its limits as attributes. `docs/examples/dashboard.yaml` is a ready-made dashboard for the two fake arms (an Overview plus one view per arm with the seven joint gauges, the task buttons, a history graph and the result log): Settings, Dashboards, Add dashboard, open its raw configuration editor and paste the file in; `docs/dashboard.md` explains it and how to adapt it to other robots. Joint sensors update often, so `docs/sensors.md` shows the recorder exclude to keep them out of long-term history.
+Each fake arm announces seven joints (`j1` to `j7`, degrees), so each device also gets `sensor.fake_arm_1_joint_1_j1` to `sensor.fake_arm_1_joint_7_j7`, updated at up to 2 Hz while a task moves them and holding between tasks; each carries its limits, the reported velocity (degrees per second for the fake arms, zero at rest) and a `moving` flag as attributes. `docs/examples/dashboard.yaml` is a ready-made dashboard for the two fake arms (an Overview plus one view per arm with the seven joint gauges, the task buttons, a history graph and the result log): Settings, Dashboards, Add dashboard, open its raw configuration editor and paste the file in; `docs/dashboard.md` explains it and how to adapt it to other robots. Joint sensors update often, so `docs/sensors.md` shows the recorder exclude to keep them out of long-term history.
 
 ## 5. How communication works
 
@@ -230,13 +232,13 @@ One MQTT broker and nothing else sits between the halves; neither imports the ot
 - A cancel travels on the same `cmd` topic as `type: cancel`; its `accepted` ack is terminal (no result of its own), and the cancelled task reports `cancelled` under its own id.
 - Home Assistant matches replies by id, fires `ros2_bridge_task_result` exactly once per command, and synthesises `timeout` or `lost` only when the robot truly never answers.
 
-**What ROS 2 sees.** Commands never appear as ROS topics, actions or services. The node calls the executor plugin (a Python class named by the `executor` parameter) in-process on its main thread, and only the executor talks ROS: the MoveIt executor is an action client on `/move_action` to `move_group`. The node's own ROS surfaces are two topics, `~/mqtt_in` (`std_msgs/String` envelopes of mirrored MQTT messages) and the latched `~/ha_link` (`std_msgs/Bool`); `~` is the node name, so `/bridge_node/mqtt_in` by default.
+**What ROS 2 sees.** Commands never appear as ROS topics, actions or services. The node calls the executor plugin (a Python class named by the `executor` parameter) in-process on its main thread, and only the executor talks ROS: the MoveIt executor is an action client on `/move_action` to `move_group`. The node's own ROS surfaces are two topics, `~/mqtt_in` (`std_msgs/String` envelopes of mirrored MQTT messages; the `mirror.ros_topic` parameter) and the latched `~/ha_link` (`std_msgs/Bool`; `watchdog.ros_topic`); `~` is the node name (the `node_name` launch argument, `bridge_node` by default), so `/bridge_node/mqtt_in` by default.
 
 **Sensors.** Two paths. Fast: the node subscribes to the Zigbee2MQTT topics in `mirror.topics` and republishes them unchanged on `~/mqtt_in`, in parallel with Home Assistant rather than through it. Normalised: Home Assistant republishes the entities in its "Mirrored entities" option under `{prefix}/ha/sensors/{domain}/{object_id}` in one canonical schema, whatever the sensor's radio.
 
 **Safety.** Home Assistant is advisory; ROS 2 owns safety and authorises every command itself. `watchdog.mode` decides what losing Home Assistant's heartbeat does: `none` (default, informational only), `inhibit_new` (refuse new motion while the link is down) or `stop_and_hold` (also stop the active task once per link loss). Nothing on MQTT is an emergency stop. With the stock Mosquitto add-on every MQTT client that can log in can publish commands; switch the shared secret on both sides before a real arm (`docs/security.md`).
 
-## 6. Can it be tested without the Isaac site?
+## 6. Can it be tested without a simulator or a real arm?
 
 Yes. The `fake` executor is the default (`executor: fake`), runs natively, in the Docker rig or in CI, and is what the 0.1.0 end-to-end run used. Its catalogue:
 
@@ -251,17 +253,17 @@ Yes. The `fake` executor is the default (`executor: fake`), runs natively, in th
 | `stop` | control | Ends the running task `cancelled/preempted` and clears any error. |
 | `pause`, `resume` | control | Freeze and continue a running task; Home Assistant's result deadline pauses with it. |
 
-Two further steps before Isaac:
+Two further steps before a simulator or a real arm:
 
 1. `tools/e2e_checklist.md`, the manual end-to-end procedure (steps 0 to 13) against a live Home Assistant with the two fake arms: from the clock check through the chaos checks, a Home Assistant restart mid-task, the watchdog modes and voice.
-2. The MoveIt executor, Tier 1 of `docs/simulator_checklist.md`: on any Jazzy machine, no GPU, it proves the MQTT to executor to `move_group` to error-code path and the negative tests before Isaac exists.
+2. The MoveIt executor, Tier 1 of `docs/simulator_checklist.md`: on any Jazzy machine, no GPU, it proves the MQTT to executor to `move_group` to error-code path and the negative tests before a simulator or an arm is available.
    - Install: `ros-jazzy-moveit`, a MoveIt configuration for an arm on `mock_components/GenericSystem` (ros2_control's fake hardware; the `moveit_resources` Panda is enough) and a running `move_group`; the bridge ships only the executor. Its one extra dependency, `moveit_msgs`, comes from `ROS2_HA_BRIDGE_WITH_MOVEIT=1 rosdep install --from-paths src --ignore-src -y --rosdistro jazzy` or `sudo apt install ros-jazzy-moveit-msgs`.
    - Configure: start from `config/moveit.example.yaml` (`executor: moveit`, `moveit.group_name`, `moveit.poses`). Section 5 of `docs/simulator_checklist.md` has the exact steps.
    - Caveat: experimental; unit-tested with a fake adapter, never yet run against a real `move_group`.
 
 ## 7. Where to go next
 
-- `docs/configuration.md`: every node parameter with its default.
+- `docs/configuration.md`: every node parameter with its default, the launch arguments, the environment variables and what is fixed on purpose.
 - `docs/troubleshooting.md`: symptom to cause, rejection codes, repairs, diagnostics.
 - `docs/assist.md`: voice control with Assist, the sentences and the replies.
 - `docs/writing-an-executor.md`: the plugin interface for your own controller.

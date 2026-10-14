@@ -48,6 +48,14 @@ the real node, from the node's own params file; see :meth:`MoveItExecutor.setup`
     factors of the ``MotionPlanRequest``. Scaling factors must lie in (0, 1].
 ``moveit.action_name`` (``/move_action``)
     The MoveGroup action name.
+``moveit.joint_tolerance_rad`` (0.01)
+    ``tolerance_above`` and ``tolerance_below`` of every ``JointConstraint``
+    sent to move_group, in radians; greater than 0.
+``moveit.motion_timeout_s`` (120.0), ``moveit.control_timeout_s`` (5.0)
+    The timeouts announced for ``move_to`` and ``home``, and for ``stop`` and
+    ``refresh_poses``. Home Assistant's buttons send no timeout of their own,
+    so the announced value is the one a button's result deadline is planned
+    on; the node still clamps both to ``command.task_timeout_cap_s``.
 ``moveit.hold_on_cancel`` (true)
     When a task is cancelled (cancel command, task timeout or the ``stop``
     task) the goal is always cancelled at move_group, which stops trajectory
@@ -72,12 +80,12 @@ the real node, from the node's own params file; see :meth:`MoveItExecutor.setup`
 
 Task catalogue (the ``kind`` decides how the bridge gates it):
 
-``move_to {pose}`` (motion, 120 s)
+``move_to {pose}`` (motion, ``moveit.motion_timeout_s``)
     ``pose`` is an enum of the configured pose names. Plans and executes.
-``home`` (motion, 120 s)
+``home`` (motion, ``moveit.motion_timeout_s``)
     Present only when a pose named ``home`` exists; the same as ``move_to``
     with that pose, so Home Assistant gets a button for it.
-``stop`` (control, 5 s)
+``stop`` (control, ``moveit.control_timeout_s``)
     Cancels the running move (the task ends ``cancelled/preempted``) and
     clears any robot error, so an operator can recover from a forced finish.
     With ``hold_on_cancel`` true and a goal in flight the error is cleared
@@ -202,11 +210,13 @@ DEFAULT_ACCELERATION_SCALE = 0.1
 DEFAULT_HOLD_ON_CANCEL = True
 #: ``sensor_msgs/JointState`` topic the joint telemetry is read from.
 DEFAULT_JOINT_STATES_TOPIC = '/joint_states'
-#: ``tolerance_above`` and ``tolerance_below`` of every joint constraint, in radians.
+#: ``moveit.joint_tolerance_rad`` default: ``tolerance_above`` and ``tolerance_below`` of
+#: every joint constraint, in radians.
 JOINT_TOLERANCE_RAD = 0.01
 #: The pose name that also gets its own ``home`` task.
 HOME_POSE = 'home'
-#: Announced timeouts (the node clamps them to ``command.task_timeout_cap_s``).
+#: ``moveit.motion_timeout_s`` and ``moveit.control_timeout_s`` defaults: the announced
+#: timeouts (the node clamps them to ``command.task_timeout_cap_s``).
 MOTION_TIMEOUT_S = 120.0
 CONTROL_TIMEOUT_S = 5.0
 #: Result code for "MoveIt or its server is not in a state to try": retryable.
@@ -237,6 +247,21 @@ SCALAR_PARAMETERS: tuple[tuple[str, str | int | float | bool | list[str], str], 
         'moveit.acceleration_scale',
         DEFAULT_ACCELERATION_SCALE,
         'MoveIt executor: max_acceleration_scaling_factor, in (0, 1].',
+    ),
+    (
+        'moveit.joint_tolerance_rad',
+        JOINT_TOLERANCE_RAD,
+        'MoveIt executor: tolerance above and below of every joint constraint, in radians.',
+    ),
+    (
+        'moveit.motion_timeout_s',
+        MOTION_TIMEOUT_S,
+        'MoveIt executor: announced timeout of move_to and home, in seconds.',
+    ),
+    (
+        'moveit.control_timeout_s',
+        CONTROL_TIMEOUT_S,
+        'MoveIt executor: announced timeout of stop and refresh_poses, in seconds.',
     ),
     (
         'moveit.hold_on_cancel',
@@ -573,6 +598,11 @@ class MoveItSettings:
     velocity_scale: float = DEFAULT_VELOCITY_SCALE
     acceleration_scale: float = DEFAULT_ACCELERATION_SCALE
     hold_on_cancel: bool = DEFAULT_HOLD_ON_CANCEL
+    #: ``moveit.joint_tolerance_rad``: both tolerances of every joint constraint.
+    joint_tolerance_rad: float = JOINT_TOLERANCE_RAD
+    #: ``moveit.motion_timeout_s`` and ``moveit.control_timeout_s``: the announced timeouts.
+    motion_timeout_s: float = MOTION_TIMEOUT_S
+    control_timeout_s: float = CONTROL_TIMEOUT_S
     #: The poses YAML file, or ``None`` when the poses were given inline.
     poses_file: Path | None = None
     #: The inline poses (empty when a file is used).
@@ -623,6 +653,16 @@ class MoveItSettings:
         hold = parameters.get('moveit.hold_on_cancel', DEFAULT_HOLD_ON_CANCEL)
         if not isinstance(hold, bool):
             raise TypeError(f'moveit.hold_on_cancel must be true or false, not {hold!r}')
+        tolerance = _number(parameters, 'moveit.joint_tolerance_rad', JOINT_TOLERANCE_RAD)
+        motion_timeout_s = _number(parameters, 'moveit.motion_timeout_s', MOTION_TIMEOUT_S)
+        control_timeout_s = _number(parameters, 'moveit.control_timeout_s', CONTROL_TIMEOUT_S)
+        for name, value in (
+            ('moveit.joint_tolerance_rad', tolerance),
+            ('moveit.motion_timeout_s', motion_timeout_s),
+            ('moveit.control_timeout_s', control_timeout_s),
+        ):
+            if value <= 0:
+                raise ValueError(f'{name} must be greater than 0, not {value:g}')
         joint_states_topic = _string(
             parameters, 'moveit.joint_states_topic', DEFAULT_JOINT_STATES_TOPIC
         ).strip()
@@ -638,6 +678,9 @@ class MoveItSettings:
             velocity_scale=velocity,
             acceleration_scale=acceleration,
             hold_on_cancel=hold,
+            joint_tolerance_rad=tolerance,
+            motion_timeout_s=motion_timeout_s,
+            control_timeout_s=control_timeout_s,
             poses_file=poses_file,
             inline_poses=inline,
             joint_states_topic=joint_states_topic,
@@ -719,8 +762,8 @@ def build_goal(settings: MoveItSettings, pose: str, joints: Mapping[str, float])
                         {
                             'joint_name': joint,
                             'position': position,
-                            'tolerance_above': JOINT_TOLERANCE_RAD,
-                            'tolerance_below': JOINT_TOLERANCE_RAD,
+                            'tolerance_above': settings.joint_tolerance_rad,
+                            'tolerance_below': settings.joint_tolerance_rad,
                             'weight': 1.0,
                         }
                         for joint, position in joints.items()
@@ -736,15 +779,25 @@ def build_goal(settings: MoveItSettings, pose: str, joints: Mapping[str, float])
     }
 
 
-def build_catalogue(poses: Mapping[str, Any]) -> tuple[TaskSpec, ...]:
-    """The task catalogue for the given pose names (``home`` only when such a pose exists)."""
+def build_catalogue(
+    poses: Mapping[str, Any],
+    *,
+    motion_timeout_s: float = MOTION_TIMEOUT_S,
+    control_timeout_s: float = CONTROL_TIMEOUT_S,
+) -> tuple[TaskSpec, ...]:
+    """The task catalogue for the given pose names (``home`` only when such a pose exists).
+
+    ``motion_timeout_s`` and ``control_timeout_s`` are the announced timeouts
+    (``moveit.motion_timeout_s``, ``moveit.control_timeout_s``); the node
+    clamps them to ``command.task_timeout_cap_s`` when it announces.
+    """
     names = sorted(poses)
     specs: list[TaskSpec] = [
         TaskSpec(
             'move_to',
             'Move to named pose',
             'motion',
-            MOTION_TIMEOUT_S,
+            motion_timeout_s,
             {
                 'type': 'object',
                 'properties': {
@@ -765,7 +818,7 @@ def build_catalogue(poses: Mapping[str, Any]) -> tuple[TaskSpec, ...]:
                 'home',
                 'Move to home',
                 'motion',
-                MOTION_TIMEOUT_S,
+                motion_timeout_s,
                 None,
                 f"Plan and execute a move to the pose named '{HOME_POSE}'",
             )
@@ -775,7 +828,7 @@ def build_catalogue(poses: Mapping[str, Any]) -> tuple[TaskSpec, ...]:
             'stop',
             'Stop',
             'control',
-            CONTROL_TIMEOUT_S,
+            control_timeout_s,
             None,
             'Cancel the running move and clear any robot error',
         )
@@ -785,7 +838,7 @@ def build_catalogue(poses: Mapping[str, Any]) -> tuple[TaskSpec, ...]:
             'refresh_poses',
             'Refresh poses',
             'query',
-            CONTROL_TIMEOUT_S,
+            control_timeout_s,
             None,
             'Re-read the poses; the announced list updates at the next node start',
         )
@@ -889,7 +942,7 @@ class MoveItExecutor(TaskExecutor):
         settings = MoveItSettings.from_parameters(values)
         self._poses = settings.load_poses()
         self._settings = settings
-        self._catalogue = build_catalogue(self._poses)
+        self._catalogue = self._build_catalogue(self._poses)
         if self._adapter is None:
             if ctx.node is None:
                 raise RuntimeError(
@@ -900,6 +953,7 @@ class MoveItExecutor(TaskExecutor):
         self._logger.info(
             'moveit executor ready for %s: group=%s action=%s poses=%s (from %s) '
             'planning_time_s=%g attempts=%d velocity_scale=%g acceleration_scale=%g '
+            'joint_tolerance_rad=%g motion_timeout_s=%g control_timeout_s=%g '
             'hold_on_cancel=%s server_available=%s joints=%s',
             ctx.robot_id,
             settings.group_name,
@@ -910,9 +964,20 @@ class MoveItExecutor(TaskExecutor):
             settings.num_attempts,
             settings.velocity_scale,
             settings.acceleration_scale,
+            settings.joint_tolerance_rad,
+            settings.motion_timeout_s,
+            settings.control_timeout_s,
             settings.hold_on_cancel,
             self._server_available(),
             ', '.join(self._joint_names) or 'none',
+        )
+
+    def _build_catalogue(self, poses: Mapping[str, Any]) -> tuple[TaskSpec, ...]:
+        """:func:`build_catalogue` with this executor's announced timeouts."""
+        return build_catalogue(
+            poses,
+            motion_timeout_s=self.settings.motion_timeout_s,
+            control_timeout_s=self.settings.control_timeout_s,
         )
 
     def tasks(self) -> Sequence[TaskSpec]:
@@ -1225,7 +1290,7 @@ class MoveItExecutor(TaskExecutor):
         removed = sorted(set(self._poses) - set(poses))
         changed = sorted(n for n in poses if n in self._poses and poses[n] != self._poses[n])
         self._poses = poses
-        self._catalogue = build_catalogue(poses)
+        self._catalogue = self._build_catalogue(poses)
         self._logger.info(
             'poses refreshed from %s: %d pose(s), added %s, removed %s, changed %s',
             source,

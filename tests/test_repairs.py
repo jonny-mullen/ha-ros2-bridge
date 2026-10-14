@@ -27,8 +27,8 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.ros2_bridge.commands import CommandRegistry
 from custom_components.ros2_bridge.const import (
     CONF_SHARED_SECRET,
+    DEFAULT_DUPLICATE_QUIET_S,
     DOMAIN,
-    DUPLICATE_QUIET_S,
     ISSUE_CLOCK_SKEW,
     ISSUE_DUPLICATE_ROBOT_ID,
     ISSUE_HMAC_REJECTED,
@@ -68,7 +68,7 @@ EXPECTED_PLACEHOLDERS: dict[str, set[str]] = {
     ISSUE_CLOCK_SKEW: {"robot_id", "skew_ms"},
     ISSUE_HMAC_REJECTED: {"robot_id", "reason"},
     ISSUE_INVALID_ANNOUNCE: {"robot_id", "topic", "reason"},
-    ISSUE_DUPLICATE_ROBOT_ID: {"robot_id", "detail"},
+    ISSUE_DUPLICATE_ROBOT_ID: {"robot_id", "detail", "quiet_minutes"},
     ISSUE_MQTT_V5_REQUIRED: {"topic"},
 }
 PLACEHOLDER_RE = re.compile(r"\{([a-z_]+)\}")
@@ -324,11 +324,12 @@ async def test_duplicate_robot_id_from_a_second_instance(
     assert opened.translation_placeholders == {
         "robot_id": ROBOT_ID,
         "detail": "instances robotpc:4123 and otherpc:99",
+        "quiet_minutes": "10",
     }
     assert ISSUE_DUPLICATE_ROBOT_ID in hub.problem_reasons(ROBOT_ID)
 
     # Ten quiet minutes close it from the housekeeping timer.
-    clock.advance_s(DUPLICATE_QUIET_S - 1)
+    clock.advance_s(DEFAULT_DUPLICATE_QUIET_S - 1)
     await advance(1)
     assert_open(hass, hub, ISSUE_DUPLICATE_ROBOT_ID, severity=ir.IssueSeverity.ERROR)
     clock.advance_s(1)

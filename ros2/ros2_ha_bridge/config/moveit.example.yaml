@@ -54,12 +54,21 @@
       group_name: ur_manipulator
       # The MoveGroup action served by move_group.
       action_name: /move_action
-      # MotionPlanRequest: allowed_planning_time (s) and num_planning_attempts.
+      # MotionPlanRequest: allowed_planning_time (s) and num_planning_attempts (default 1; 3 here
+      # gives the planner a second and third try).
       planning_time_s: 5.0
       num_attempts: 3
       # MotionPlanRequest scaling factors, in (0, 1]. Keep them low in an assistive setting.
       velocity_scale: 0.1
       acceleration_scale: 0.1
+      # tolerance_above and tolerance_below of every JointConstraint, in radians (greater than 0).
+      joint_tolerance_rad: 0.01
+      # Announced timeouts, in seconds: move_to and home, then stop and refresh_poses. The buttons
+      # Home Assistant generates send no timeout of their own, so these are what a button's result
+      # deadline is planned on; the node clamps both to command.task_timeout_cap_s. A long move at
+      # a low velocity_scale may need more than the default 120.
+      motion_timeout_s: 120.0
+      control_timeout_s: 5.0
       # true: a cancelled move finishes only once move_group confirms the goal ended (the arm is
       # holding), and the stop task clears a robot error only on that confirmation; false: both
       # happen as soon as the cancel request has been sent.

@@ -79,8 +79,14 @@ _TARGET_FIELDS: VolDictType = {
 _WAIT_FIELD: VolDictType = {
     probatio.Optional(ATTR_WAIT, default=WAIT_ACK): probatio.In(WAIT_MODES),
 }
+#: The smallest ``max_age_ms`` the actions accept, the same floor as the options form; there
+#: is no ceiling here because the node clamps to its own ``command.max_age_cap_ms``.
+MIN_MAX_AGE_MS: Final = 1000
+
 _MAX_AGE_FIELD: VolDictType = {
-    probatio.Optional(ATTR_MAX_AGE_MS): probatio.All(probatio.Coerce(int), probatio.Range(min=1)),
+    probatio.Optional(ATTR_MAX_AGE_MS): probatio.All(
+        probatio.Coerce(int), probatio.Range(min=MIN_MAX_AGE_MS)
+    ),
 }
 
 SEND_TASK_SCHEMA: VolSchemaType = probatio.All(

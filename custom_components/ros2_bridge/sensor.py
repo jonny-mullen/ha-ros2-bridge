@@ -32,6 +32,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import (
     DOMAIN,
+    JOINT_DISPLAY_PRECISION,
     SIGNAL_ROBOT_ADDED,
     SIGNAL_ROBOT_JOINTS_CHANGED,
     SIGNAL_ROBOT_JOINTS_UPDATED,
@@ -51,6 +52,9 @@ PARALLEL_UPDATES = 0
 
 #: Attributes that change often or carry no history value; never written to the recorder.
 STATE_UNRECORDED_ATTRIBUTES = frozenset({"progress", "stage", "message", "since", "session"})
+#: The joint sensors' live attributes: they change with every payload and the position
+#: history already tells the story, so the recorder keeps the fixed attributes only.
+JOINT_UNRECORDED_ATTRIBUTES = frozenset({"velocity", "moving"})
 
 
 async def async_setup_entry(
@@ -275,13 +279,22 @@ class JointSensor(Ros2BridgeEntity, SensorEntity):
     the position's place in the ``joints`` payload; the name shows the index
     from 1 ("Joint 1 j1"). The attributes ``index`` (from 0), ``joint_name``,
     ``limit_min`` and ``limit_max`` are fixed for the life of the entity, because
-    a change in any of them makes a new entity. The value is the latest
+    a change in any of them makes a new entity. ``velocity`` is the payload's
+    velocity for this joint (``null`` when the node sends none) and ``moving``
+    is the hub's verdict on the latest payload (``BridgeHub._joint_moving``:
+    the reported velocity exceeds the ``joint_moving_threshold`` option, or,
+    for a robot that sends no velocities, the position moved by more than it
+    since the previous payload), cleared once no newer payload has arrived
+    within the ``joint_moving_hold_s`` option; both are ``null``
+    before the first payload and neither is recorded. The value is the latest
     accepted position; it becomes unknown when a re-announce changes the layout
-    and unavailable with the robot, never on a quiet joints stream alone.
+    and unavailable with the robot, never on a quiet joints stream alone. The
+    suggested display precision follows the unit (0.1 deg, 0.001 rad) and is
+    changeable per entity in its settings dialog.
     """
 
     _attr_translation_key = "joint"
-    _attr_suggested_display_precision = 1
+    _unrecorded_attributes = JOINT_UNRECORDED_ATTRIBUTES
 
     def __init__(self, hub: BridgeHub, robot_id: str, index: int, info: JointInfo) -> None:
         super().__init__(hub, robot_id, f"joint_{index}")
@@ -291,15 +304,21 @@ class JointSensor(Ros2BridgeEntity, SensorEntity):
         self.key = info.joint_key(index)
         limit = info.limit(index)
         self._attr_native_unit_of_measurement = info.unit_symbol
+        self._attr_suggested_display_precision = JOINT_DISPLAY_PRECISION[info.unit]
         self._attr_translation_placeholders = {
             "index": str(index + 1),
             "joint_name": self.joint_name,
         }
-        self._attr_extra_state_attributes = {
+        self._fixed_attributes: dict[str, Any] = {
             "index": index,
             "joint_name": self.joint_name,
             "limit_min": None if limit is None else limit[0],
             "limit_max": None if limit is None else limit[1],
+        }
+        self._attr_extra_state_attributes = {
+            **self._fixed_attributes,
+            "velocity": None,
+            "moving": None,
         }
 
     async def async_added_to_hass(self) -> None:
@@ -315,7 +334,20 @@ class JointSensor(Ros2BridgeEntity, SensorEntity):
     def _handle_robot_update(self) -> None:
         robot = self.robot
         joints = robot.joints if robot is not None else None
-        if joints is None or self.index >= len(joints.positions):
+        velocity: float | None = None
+        moving: bool | None = None
+        if robot is None or joints is None or self.index >= len(joints.positions):
             self._attr_native_value = None
         else:
             self._attr_native_value = joints.positions[self.index]
+            if joints.velocities is not None and self.index < len(joints.velocities):
+                velocity = joints.velocities[self.index]
+            flags = robot.joint_moving
+            moving = (
+                bool(flags[self.index]) if flags is not None and self.index < len(flags) else False
+            )
+        self._attr_extra_state_attributes = {
+            **self._fixed_attributes,
+            "velocity": velocity,
+            "moving": moving,
+        }

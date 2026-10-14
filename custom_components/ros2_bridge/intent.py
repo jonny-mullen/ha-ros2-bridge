@@ -11,12 +11,18 @@ answer with the error speech "The robot bridge is not loaded".
 The robot is resolved in this order: the ``name`` slot as a robot id, then as
 a folded robot or device name; the ``area`` slot; the area of the satellite
 that heard the command (``intent_obj.device_id``); and finally the only robot
-there is. Anything ambiguous asks "Which arm do you mean?". The task is
+there is. Anything ambiguous asks "Which robot do you mean?". The task is
 matched by name and then by label. The handler waits for the acknowledgement
-for at most ``min(ack_timeout_s, 1.5)`` seconds and speaks "Starting {label}
-on {robot}", "{robot} refused: {reason}" or "Sent {label} to {robot}, I will
-report back"; it never waits for the result (Q10: the outcome is reported
-later by an automation on ``ros2_bridge_task_result``).
+for at most ``min(ack_timeout_s, intent_ack_wait_s)`` seconds (both options)
+and speaks "Starting {label} on {robot}", "{robot} refused: {reason}" or
+"Sent {label} to {robot}, I will report back"; it never waits for the result
+(Q10: the outcome is reported later by an automation on
+``ros2_bridge_task_result``).
+
+Every spoken reply lives in :data:`SPEECH`, one table, so an adopter whose
+robot is not an arm, or a translator, changes the wording in one place
+without touching the handlers. The replies are deliberately generic ("robot",
+never "arm").
 """
 
 from __future__ import annotations
@@ -46,16 +52,38 @@ _LOGGER = logging.getLogger(__name__)
 INTENT_SEND_TASK: Final = "Ros2BridgeSendTask"
 INTENT_CANCEL_TASK: Final = "Ros2BridgeCancelTask"
 
-#: Upper bound on how long a voice command waits for the acknowledgement.
-INTENT_ACK_WAIT_CAP_S: Final = 1.5
-
-SPEECH_NOT_LOADED: Final = "The robot bridge is not loaded"
-SPEECH_WHICH_ARM: Final = "Which arm do you mean?"
-SPEECH_NO_ROBOTS: Final = "No robot has announced itself yet"
+#: Every spoken reply. Entries with braces are ``str.format`` templates taking ``robot``
+#: (the robot's announced name), ``task`` (the task's announced label), ``name`` or
+#: ``area`` (the spoken words) and ``reason`` (the robot's ack reason or code).
+SPEECH: Final[dict[str, str]] = {
+    "not_loaded": "The robot bridge is not loaded",
+    "not_ready": "The robot bridge is not ready yet",
+    "which_robot": "Which robot do you mean?",
+    "no_robots": "No robot has announced itself yet",
+    "unknown_robot": "I do not know a robot called {name}",
+    "unknown_area": "I do not know an area called {area}",
+    "no_robot_in_area": "There is no robot in {area}",
+    "unknown_task": "{robot} has no task called {task}",
+    "unavailable": "{robot} is not available right now",
+    "too_many_pending": "{robot} has too many commands waiting",
+    "needs_params": "{task} needs details I cannot take by voice",
+    "unreachable": "I could not reach {robot}",
+    "forgotten": "I do not know {robot} any more",
+    "refused": "{robot} refused: {reason}",
+    "starting": "Starting {task} on {robot}",
+    "sent": "Sent {task} to {robot}, I will report back",
+    "cancelling": "Cancelling the current task on {robot}",
+    "cancel_sent": "Sent cancel to {robot}, I will report back",
+}
 
 SLOT_TASK: Final = "task"
 SLOT_NAME: Final = "robot"  # not "name": Home Assistant resolves a "name" slot as an entity name
 SLOT_AREA: Final = "area"
+
+
+def say(key: str, **values: Any) -> str:
+    """The reply ``key`` from :data:`SPEECH` with its placeholders filled in."""
+    return SPEECH[key].format(**values)
 
 
 # --------------------------------------------------------------------------- resolution
@@ -128,18 +156,18 @@ def resolve_robot(
         if len(matches) == 1:
             return matches[0], ""
         if matches:
-            return None, SPEECH_WHICH_ARM
-        return None, f"I do not know a robot called {name}"
+            return None, say("which_robot")
+        return None, say("unknown_robot", name=name)
     if area:
         entry = _find_area(hass, area)
         if entry is None:
-            return None, f"I do not know an area called {area}"
+            return None, say("unknown_area", area=area)
         matches = _robots_in_area(robots, devices, entry.id)
         if len(matches) == 1:
             return matches[0], ""
         if matches:
-            return None, SPEECH_WHICH_ARM
-        return None, f"There is no robot in {entry.name}"
+            return None, say("which_robot")
+        return None, say("no_robot_in_area", area=entry.name)
     if device_id:
         satellite = devices.async_get(device_id)
         if satellite is not None and satellite.area_id:
@@ -147,12 +175,12 @@ def resolve_robot(
             if len(matches) == 1:
                 return matches[0], ""
             if matches:
-                return None, SPEECH_WHICH_ARM
+                return None, say("which_robot")
     if len(robots) == 1:
         return robots[0], ""
     if not robots:
-        return None, SPEECH_NO_ROBOTS
-    return None, SPEECH_WHICH_ARM
+        return None, say("no_robots")
+    return None, say("which_robot")
 
 
 def resolve_task(robot: Robot, text: str) -> TaskSpec | None:
@@ -175,33 +203,33 @@ def _slot(slots: Mapping[str, Any], key: str) -> str | None:
     return text or None
 
 
+#: Hub error translation keys and the :data:`SPEECH` entry each is spoken as.
+_SPEECH_FOR_ERROR: Final[dict[str, str]] = {
+    "robot_unavailable": "unavailable",
+    "too_many_pending": "too_many_pending",
+    "invalid_params": "needs_params",
+    "not_ready": "not_ready",
+    "publish_failed": "unreachable",
+    "task_unknown": "unknown_task",
+    "robot_unknown": "forgotten",
+}
+
+
 def _speech_for_error(error: HomeAssistantError, robot: Robot, label: str) -> str:
     """Plain speech for a hub error, keyed on its translation key (no translations needed)."""
-    key = error.translation_key
-    if key == "robot_unavailable":
-        return f"{robot.name} is not available right now"
-    if key == "too_many_pending":
-        return f"{robot.name} has too many commands waiting"
-    if key == "invalid_params":
-        return f"{label} needs details I cannot take by voice"
-    if key == "not_ready":
-        return "The robot bridge is not ready yet"
-    if key == "publish_failed":
-        return f"I could not reach {robot.name}"
-    if key == "task_unknown":
-        return f"{robot.name} has no task called {label}"
-    if key == "robot_unknown":
-        return f"I do not know {robot.name} any more"
-    return str(error)
+    key = _SPEECH_FOR_ERROR.get(error.translation_key or "")
+    if key is None:
+        return str(error)
+    return say(key, robot=robot.name, task=label)
 
 
 async def _async_wait_ack_briefly(hub: BridgeHub, command: PendingCommand) -> None:
-    """Wait for the ack for at most ``min(ack_timeout_s, INTENT_ACK_WAIT_CAP_S)`` seconds."""
+    """Wait for the ack for at most ``min(ack_timeout_s, intent_ack_wait_s)`` seconds."""
     try:
         future = hub.registry.wait_ack(command.task_id)
     except KeyError:
         return
-    timeout = min(hub.options.ack_timeout_s, INTENT_ACK_WAIT_CAP_S)
+    timeout = min(hub.options.ack_timeout_s, hub.options.intent_ack_wait_s)
     try:
         await asyncio.wait_for(future, timeout)
     except TimeoutError:
@@ -245,7 +273,7 @@ class _RobotIntentHandler(intent.IntentHandler):
         hub = async_get_hub(intent_obj.hass)
         if hub is None:
             return self._error(
-                intent_obj, SPEECH_NOT_LOADED, intent.IntentResponseErrorCode.FAILED_TO_HANDLE
+                intent_obj, say("not_loaded"), intent.IntentResponseErrorCode.FAILED_TO_HANDLE
             )
         robot, speech = resolve_robot(
             intent_obj.hass,
@@ -257,6 +285,15 @@ class _RobotIntentHandler(intent.IntentHandler):
         if robot is None:
             return self._error(intent_obj, speech)
         return hub, robot
+
+    def _refused(self, intent_obj: intent.Intent, robot: Robot, command: PendingCommand) -> Any:
+        ack = command.ack
+        reason = (ack.reason or ack.code) if ack is not None else "unknown"
+        return self._error(
+            intent_obj,
+            say("refused", robot=robot.name, reason=reason),
+            intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
+        )
 
 
 SEND_TASK_SLOT_SCHEMA: VolDictType = {
@@ -291,7 +328,7 @@ class Ros2BridgeSendTaskHandler(_RobotIntentHandler):
         task_text = _slot(slots, SLOT_TASK) or ""
         spec = resolve_task(robot, task_text)
         if spec is None:
-            return self._error(intent_obj, f"{robot.name} has no task called {task_text}")
+            return self._error(intent_obj, say("unknown_task", robot=robot.name, task=task_text))
         try:
             command = await hub.async_send_task(
                 robot.robot_id, spec.name, {}, source=self._source(intent_obj)
@@ -304,18 +341,13 @@ class Ros2BridgeSendTaskHandler(_RobotIntentHandler):
             )
         await _async_wait_ack_briefly(hub, command)
         if command.accepted is False:
-            ack = command.ack
-            reason = (ack.reason or ack.code) if ack is not None else "unknown"
-            return self._error(
-                intent_obj,
-                f"{robot.name} refused: {reason}",
-                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-            )
+            response: intent.IntentResponse = self._refused(intent_obj, robot, command)
+            return response
         response = intent_obj.create_response()
         if command.accepted is True:
-            response.async_set_speech(f"Starting {spec.label} on {robot.name}")
+            response.async_set_speech(say("starting", task=spec.label, robot=robot.name))
         else:
-            response.async_set_speech(f"Sent {spec.label} to {robot.name}, I will report back")
+            response.async_set_speech(say("sent", task=spec.label, robot=robot.name))
         return response
 
 
@@ -349,18 +381,13 @@ class Ros2BridgeCancelTaskHandler(_RobotIntentHandler):
             )
         await _async_wait_ack_briefly(hub, command)
         if command.accepted is False:
-            ack = command.ack
-            reason = (ack.reason or ack.code) if ack is not None else "unknown"
-            return self._error(
-                intent_obj,
-                f"{robot.name} refused: {reason}",
-                intent.IntentResponseErrorCode.FAILED_TO_HANDLE,
-            )
+            response: intent.IntentResponse = self._refused(intent_obj, robot, command)
+            return response
         response = intent_obj.create_response()
         if command.accepted is True:
-            response.async_set_speech(f"Cancelling the current task on {robot.name}")
+            response.async_set_speech(say("cancelling", robot=robot.name))
         else:
-            response.async_set_speech(f"Sent cancel to {robot.name}, I will report back")
+            response.async_set_speech(say("cancel_sent", robot=robot.name))
         return response
 
 

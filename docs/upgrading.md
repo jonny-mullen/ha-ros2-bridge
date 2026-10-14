@@ -8,7 +8,7 @@ How to move either half of ha-ros2-bridge to a newer version, what stays compati
 - **Both halves carry the same version number per release.** `scripts/check_versions.py` keeps `manifest.json`, `const.py`, `package.xml`, `setup.py`, the ROS package's `__init__.py` and the latest `CHANGELOG.md` heading in agreement; the release workflow refuses a tag that does not match. Upgrade the two halves in either order; they are not required to match at any instant, only to speak schema 1.
 - **The Home Assistant Store document is version 1.** The integration keeps its outstanding commands, the ids of results it has already seen and the sensor topics it has published in `.storage/ros2_bridge.commands` (`STORAGE_VERSION = 1`, key `ros2_bridge.commands`). The loader normalises whatever is on disk and drops unreadable parts, so a document written by an older build loads; a future change to the document's shape that cannot be read that way would raise the Store version and ship a migration with it, and would be listed here.
 - **The node's dedupe file is a plain JSON cache.** `data_dir/dedupe.json` (default `~/.ros/ros2_ha_bridge/{robot.id}/`) holds recently answered command ids and their acks for `command.dedupe_window_s`. A newer node that cannot read an older file logs one warning and starts memory-only; nothing else depends on it.
-- **Options survive.** The integration's config entry (the generated `instance_id`) and its nine options are not rewritten by an upgrade.
+- **Options survive.** The integration's config entry (the generated `instance_id`) and its options are not rewritten by an upgrade.
 
 ## Upgrading the Home Assistant integration
 
@@ -42,11 +42,17 @@ Re-adding the integration, re-entering the prefix or the secret, or touching `.s
    source install/setup.bash
    ```
 
-   then restart however the node is run: `systemctl restart <unit>` for the service in `docs/install-ros2.md`, Ctrl-C and `ros2 launch` again for an interactive run, or `docker compose build && docker compose up -d arm1 arm2` for the rig in `tools/`. The launch file respawns a node that exits (two seconds delay, at most three retries), which covers a crash during the swap but not a deliberate stop; a clean stop publishes `offline` and the restart publishes `online`, the announce and the state again.
+   then restart however the node is run: `systemctl restart <unit>` for the service in `docs/install-ros2.md`, Ctrl-C and `ros2 launch` again for an interactive run, or `docker compose build && docker compose up -d arm1 arm2` for the rig in `tools/`. The launch file respawns a node that exits (the launch arguments `respawn`, `respawn_delay` and `respawn_max_retries`: on, 2 s and 3 by default; `docs/configuration.md`, Launch arguments), which covers a crash during the swap but not a deliberate stop; a clean stop publishes `offline` and the restart publishes `online`, the announce and the state again.
 4. Check: the node's log says `connected to the MQTT broker as ...`; the retained announce on `{prefix}/{robot_id}/announce` carries the new `bridge_version`; Home Assistant's device shows the new catalogue if it changed (buttons follow a re-announce: a renamed task is a new button and the old one disappears, which breaks dashboards that referenced it; task names are an adopter's public contract).
 5. One robot at a time in a fleet, because each node is its own process and the catalogue is per robot.
 
 Parameters files keep working across versions: a parameter that gains a new name is listed here with its old name. A parameter that no longer exists is reported by rclpy at start-up as unused, not as an error.
+
+## Per-release notes
+
+### 0.2.0 (unreleased)
+
+Joint telemetry is on by default for every executor that announces joints: the fake executor always does, and the MoveIt executor does when `moveit.joint_names` or the first pose names the joints. A 0.1.0 site that upgrades the node with no configuration change therefore gains a `joints` block in its announce, a `{prefix}/{robot_id}/joints` topic at `telemetry.joints_rate_hz` (2.0) and, with the MoveIt executor, a `/joint_states` subscription; a Home Assistant that upgrades gains one sensor per announced joint, enabled and recorded by default. To keep 0.1.0 behaviour, set `telemetry.joints_rate_hz: 0.0` on the node (no topic, no announce block, so no sensors); to keep the sensors but not their history, add the recorder exclude from `docs/sensors.md` (`entity_globs: sensor.*_joint_*`). Nothing on the wire that existed in 0.1.0 changed, and no option or parameter was renamed; the options and parameters added on 2026-10-14 all default to the values 0.1.0 had as constants (`CHANGELOG.md`).
 
 ## Home Assistant churn watch-list
 

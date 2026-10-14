@@ -427,16 +427,25 @@ def test_settings_defaults_and_values() -> None:
     assert settings.hold_on_cancel is True and settings.poses_file is None
     assert settings.joint_states_topic == DEFAULT_JOINT_STATES_TOPIC == '/joint_states'
     assert settings.joint_names == ()
+    assert settings.joint_tolerance_rad == JOINT_TOLERANCE_RAD == 0.01
+    assert settings.motion_timeout_s == moveit.MOTION_TIMEOUT_S == 120.0
+    assert settings.control_timeout_s == moveit.CONTROL_TIMEOUT_S == 5.0
     assert settings.load_poses() == {'home': HOME, 'rest': REST}
     custom = MoveItSettings.from_parameters(
         {
             **PARAMETERS,
             'moveit.joint_states_topic': ' /robot/joint_states ',
             'moveit.joint_names': ['elbow_joint', 'shoulder_pan_joint '],
+            'moveit.joint_tolerance_rad': 0.05,
+            'moveit.motion_timeout_s': 300,
+            'moveit.control_timeout_s': 2.5,
         }
     )
     assert custom.joint_states_topic == '/robot/joint_states'
     assert custom.joint_names == ('elbow_joint', 'shoulder_pan_joint')
+    assert custom.joint_tolerance_rad == 0.05
+    assert (custom.motion_timeout_s, custom.control_timeout_s) == (300.0, 2.5)
+    assert isinstance(custom.motion_timeout_s, float), 'an integer serves a double'
     minimal = MoveItSettings.from_parameters(
         {'moveit.group_name': 'arm', 'moveit.poses': {'a': {'j': 1}}, 'moveit.num_attempts': 2.0}
     )
@@ -444,6 +453,11 @@ def test_settings_defaults_and_values() -> None:
     assert minimal.velocity_scale == 0.1 and minimal.acceleration_scale == 0.1
     assert minimal.hold_on_cancel is True
     assert minimal.load_poses() == {'a': {'j': 1.0}}
+    assert {name for name, _, _ in moveit.SCALAR_PARAMETERS} >= {
+        'moveit.joint_tolerance_rad',
+        'moveit.motion_timeout_s',
+        'moveit.control_timeout_s',
+    }, 'declared on the node like every other moveit.* parameter'
 
 
 @pytest.mark.parametrize(
@@ -460,6 +474,13 @@ def test_settings_defaults_and_values() -> None:
         ({'moveit.velocity_scale': 1.5}, 'velocity_scale'),
         ({'moveit.acceleration_scale': -0.1}, 'acceleration_scale'),
         ({'moveit.hold_on_cancel': 'yes'}, 'hold_on_cancel'),
+        ({'moveit.joint_tolerance_rad': 0}, 'joint_tolerance_rad'),
+        ({'moveit.joint_tolerance_rad': -0.01}, 'joint_tolerance_rad'),
+        ({'moveit.joint_tolerance_rad': 'loose'}, 'joint_tolerance_rad'),
+        ({'moveit.motion_timeout_s': 0}, 'motion_timeout_s'),
+        ({'moveit.motion_timeout_s': float('inf')}, 'motion_timeout_s'),
+        ({'moveit.control_timeout_s': -5}, 'control_timeout_s'),
+        ({'moveit.control_timeout_s': True}, 'control_timeout_s'),
         ({'moveit.poses': {}}, 'no poses'),
         ({'moveit.poses': ''}, 'no poses'),
         ({'moveit.poses': 3}, 'moveit.poses'),
@@ -650,6 +671,47 @@ def test_goal_dict_shape(rig: Rig) -> None:
     }
     rig.run('move_to', {'pose': 'rest'})
     assert rig.adapter.last.goal == build_goal(settings, 'rest', REST)
+
+
+def test_joint_tolerance_and_timeouts_follow_the_parameters(
+    clock: FakeClock, scheduler: FakeScheduler, tmp_path: Path
+) -> None:
+    """``moveit.joint_tolerance_rad`` reaches every constraint; the two timeouts reach the catalogue."""
+    rig = make_rig(
+        clock,
+        scheduler,
+        **{
+            'moveit.joint_tolerance_rad': 0.05,
+            'moveit.motion_timeout_s': 30,
+            'moveit.control_timeout_s': 2,
+        },
+    )
+    timeouts = {spec.name: spec.timeout_s for spec in rig.executor.tasks()}
+    assert timeouts == {'move_to': 30.0, 'home': 30.0, 'stop': 2.0, 'refresh_poses': 2.0}
+    for spec in rig.executor.tasks():
+        assert protocol.validate_task_spec(spec) == [], spec
+    rig.run('move_to', {'pose': 'home'})
+    constraints = rig.adapter.last.goal['request']['goal_constraints'][0]['joint_constraints']
+    assert len(constraints) == len(HOME)
+    assert all(c['tolerance_above'] == c['tolerance_below'] == 0.05 for c in constraints)
+    rig.adapter.last.complete(1)
+    # A refresh rebuilds the catalogue with the same timeouts, not the module defaults.
+    poses_file = tmp_path / 'poses.yaml'
+    poses_file.write_text('home: {shoulder_pan_joint: 0.1}\n', encoding='utf-8')
+    rig.executor._settings = moveit.MoveItSettings.from_parameters(
+        {**PARAMETERS, 'moveit.poses': str(poses_file), 'moveit.motion_timeout_s': 30}
+    )
+    refresh, _ = rig.run('refresh_poses')
+    assert rig.result_of(refresh)['status'] == 'succeeded'
+    assert {spec.name: spec.timeout_s for spec in rig.executor.tasks()} == {
+        'move_to': 30.0,
+        'home': 30.0,
+        'stop': 5.0,
+        'refresh_poses': 5.0,
+    }
+    # The defaults, with nothing given, are the module constants.
+    defaults = {spec.name: spec.timeout_s for spec in moveit.build_catalogue({'home': HOME})}
+    assert defaults == {'move_to': 120.0, 'home': 120.0, 'stop': 5.0, 'refresh_poses': 5.0}
 
 
 def test_unknown_pose_is_rejected_before_any_goal(rig: Rig) -> None:

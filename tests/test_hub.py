@@ -695,6 +695,7 @@ async def test_duplicate_robot_id_from_a_differing_instance(
     assert issue.translation_placeholders == {
         "robot_id": ROBOT_ID,
         "detail": "instances robotpc:4123 and otherpc:77",
+        "quiet_minutes": "10",
     }
     assert "duplicate_robot_id" in hub.problem_reasons(ROBOT_ID)
     assert _state(hass, "binary_sensor", "problem") == "on"
@@ -731,5 +732,6 @@ async def test_duplicate_robot_id_from_session_flapping(
     assert issue.translation_placeholders == {
         "robot_id": ROBOT_ID,
         "detail": "4 session changes in 5 minutes",
+        "quiet_minutes": "10",
     }
     assert hub.robots[ROBOT_ID].duplicate_open is True

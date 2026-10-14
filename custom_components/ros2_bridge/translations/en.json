@@ -49,18 +49,57 @@
           "result_timeout_margin_s": "Result timeout margin",
           "max_pending_per_robot": "Maximum pending commands per robot",
           "heartbeat_unavailable_after_s": "Unavailable after missing heartbeats for",
-          "mirror_entities": "Mirrored entities"
+          "mirror_entities": "Mirrored entities",
+          "intent_ack_wait_s": "Voice acknowledgement wait",
+          "joint_moving_threshold": "Joint moving threshold",
+          "joint_moving_hold_s": "Joint moving hold",
+          "mirror_extra_attributes": "Extra mirrored attributes"
         },
         "data_description": {
           "topic_prefix": "Changing the prefix moves every subscription and publication; the robots must be configured with the same prefix.",
           "shared_secret": "Leave empty to send unsigned commands. When set, it must match the secret configured on the robots.",
           "heartbeat_interval_s": "How often Home Assistant publishes its heartbeat to the robots, in seconds. 0 disables it; robots then report the link as down.",
           "ack_timeout_s": "How long to wait for a robot to acknowledge a command before it is reported as not acknowledged (outcome unknown).",
-          "command_max_age_ms": "How long a command stays valid after it is issued, in milliseconds. Robots refuse older commands as stale.",
+          "command_max_age_ms": "How long a command stays valid after it is issued, in milliseconds. Robots refuse older commands as stale, and each node clamps the value to its own command.max_age_cap_ms (default 30000).",
           "result_timeout_margin_s": "Extra seconds beyond a task's announced timeout before Home Assistant reports a missing result.",
-          "max_pending_per_robot": "Commands may be outstanding per robot at once; further commands are refused.",
-          "heartbeat_unavailable_after_s": "Seconds without a robot heartbeat before its entities become unavailable. 0 disables this; shorter gaps only turn the problem sensor on.",
-          "mirror_entities": "Entities republished to the robots under the prefix's ha/sensors topics in the canonical sensor schema, one retained message per entity."
+          "max_pending_per_robot": "How many commands may be outstanding per robot at once; further commands are refused.",
+          "heartbeat_unavailable_after_s": "Seconds without a robot heartbeat before its entities become unavailable. 0 disables this. Keep it above the stale threshold (Advanced: heartbeat stale intervals, times the robot's heartbeat interval), or the entities go unavailable before the problem sensor can warn.",
+          "mirror_entities": "Entities republished to the robots under the prefix's ha/sensors topics in the canonical sensor schema, one retained message per entity, on every state or attribute change.",
+          "intent_ack_wait_s": "How long a voice command waits for the robot's acknowledgement before replying \"I will report back\", in seconds. Never longer than the acknowledgement timeout.",
+          "joint_moving_threshold": "A joint sensor's moving attribute turns on when the robot's reported velocity exceeds this, in the announced unit per second; a robot that reports no velocities is judged by its positions instead, moving when one changed by more than this since the previous report. Reported velocities decide alone, so a reported 0 means at rest even if the position still changed. 0 uses the unit's default: 0.5 for degrees, 0.01 for radians.",
+          "joint_moving_hold_s": "How long a report's moving verdict stands when no newer report arrives, in seconds, after which the joint counts as still. A robot publishes positions only when they change, so a slowly moving joint reports less often than its announced rate; raise this if moving flickers during a slow sweep. 0 means two publication intervals of the robot's announced rate, never less than 1 s.",
+          "mirror_extra_attributes": "Attribute names added to the built-in allowlist of attributes a mirrored entity may carry to the robots, one name per entry (for example pm2_5 or moisture). Everything published here is readable by every client of the broker: never add locations, tokens, identifiers or anything else private."
+        },
+        "description": "Everyday settings are on this form. The timings shared with the robot nodes and the heuristics behind two repairs are under Advanced; their defaults match the nodes' defaults, so change them only together with the matching node parameter.",
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "description": "Timings the robot nodes share and the heuristics behind two repairs. The defaults are the nodes' defaults; an expiry changed here must be changed on every node too.",
+            "data": {
+              "ack_expiry_s": "Acknowledgement expiry",
+              "result_expiry_s": "Result expiry",
+              "replay_settle_s": "Replay settle period",
+              "session_change_grace_s": "Session change grace",
+              "feedback_throttle_ms": "Feedback throttle",
+              "heartbeat_stale_intervals": "Heartbeat stale intervals",
+              "clock_skew_warn_ms": "Clock skew warning",
+              "duplicate_session_changes": "Duplicate robot id: session changes",
+              "duplicate_session_window_s": "Duplicate robot id: window",
+              "duplicate_quiet_s": "Duplicate robot id: quiet period"
+            },
+            "data_description": {
+              "ack_expiry_s": "Must equal the nodes' reply.ack_expiry_s: how long a retained acknowledgement lives on the broker, in seconds. It is how long a cancel waits for its acknowledgement.",
+              "result_expiry_s": "Must equal the nodes' reply.result_expiry_s: how long a retained result lives on the broker, in seconds. Home Assistant remembers seen result ids for this long plus the result timeout margin, so a retained replay after a restart never fires a task result twice.",
+              "replay_settle_s": "Quiet period after the subscriptions are confirmed and MQTT is connected before outstanding commands are reconciled against the retained replay, in seconds. A large fleet or a slow broker may want longer.",
+              "session_change_grace_s": "How long after a robot's session changes (its node restarted) Home Assistant waits for that robot's retained results before marking its outstanding commands lost, in seconds.",
+              "feedback_throttle_ms": "The least time between two feedback writes (progress, stage, message) into a robot's state sensor, in milliseconds; 0 writes every feedback. Set it to 1000 divided by the nodes' reply.feedback_max_rate_hz to show every message.",
+              "heartbeat_stale_intervals": "How many of the robot's announced heartbeat intervals may pass without a heartbeat before it counts as stale (problem sensor reason heartbeat_stale). Raise it on a jittery network.",
+              "clock_skew_warn_ms": "An acknowledgement reporting a clock difference of this many milliseconds or more opens the clock skew repair. Keep it below the nodes' command.clock_skew_tolerance_ms (default 2000).",
+              "duplicate_session_changes": "More than this many session changes of one robot within the window below open the duplicate robot id repair.",
+              "duplicate_session_window_s": "The sliding window the session changes are counted over, in seconds. It also bounds how long a second instance's heartbeats are remembered.",
+              "duplicate_quiet_s": "Seconds without new evidence after which the duplicate robot id repair closes by itself."
+            }
+          }
         }
       }
     },
@@ -237,7 +276,7 @@
   "issues": {
     "clock_skew": {
       "title": "Clock skew with robot {robot_id}",
-      "description": "Robot {robot_id} reports a clock difference of {skew_ms} ms against Home Assistant. Commands carry an issue time and a maximum age, so a difference above the robot's tolerance makes it refuse them as stale or from the future. Check that both machines use NTP and that their clocks agree to within two seconds. This issue closes by itself once an acknowledgement arrives with an acceptable difference."
+      "description": "Robot {robot_id} reports a clock difference of {skew_ms} ms against Home Assistant. Commands carry an issue time and a maximum age, so a difference above the robot's tolerance makes it refuse them as stale or from the future. Check that both machines use NTP and that their clocks agree to within two seconds. The threshold is the clock skew warning option under Advanced. This issue closes by itself once an acknowledgement arrives with an acceptable difference."
     },
     "hmac_rejected": {
       "title": "Robot {robot_id} refused the command signature",
@@ -253,7 +292,7 @@
     },
     "duplicate_robot_id": {
       "title": "Two robot nodes may be using the id {robot_id}",
-      "description": "Home Assistant saw evidence that more than one bridge node is publishing as robot {robot_id}: {detail}. Two nodes with one id take each other's broker session over in turn and their state, acknowledgements and results interleave. A node that crashes and restarts repeatedly can trip this check too, which also needs attention. Give each robot its own robot.id parameter and restart the nodes. This issue closes by itself after ten quiet minutes."
+      "description": "Home Assistant saw evidence that more than one bridge node is publishing as robot {robot_id}: {detail}. Two nodes with one id take each other's broker session over in turn and their state, acknowledgements and results interleave. A node that crashes and restarts repeatedly can trip this check too, which also needs attention. Give each robot its own robot.id parameter and restart the nodes. This issue closes by itself after {quiet_minutes} quiet minutes (the duplicate robot id quiet period option)."
     }
   }
 }

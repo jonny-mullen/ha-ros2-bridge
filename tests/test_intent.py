@@ -6,27 +6,35 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import timedelta
 from typing import Any
 
 import pytest
+from freezegun.api import FrozenDateTimeFactory
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import intent
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from custom_components.ros2_bridge.commands import CommandRegistry
-from custom_components.ros2_bridge.const import DOMAIN
+from custom_components.ros2_bridge.const import (
+    CONF_ACK_TIMEOUT_S,
+    CONF_INTENT_ACK_WAIT_S,
+    DEFAULT_INTENT_ACK_WAIT_S,
+    DOMAIN,
+)
 from custom_components.ros2_bridge.hub import BridgeHub
 from custom_components.ros2_bridge.intent import (
-    INTENT_ACK_WAIT_CAP_S,
     INTENT_CANCEL_TASK,
     INTENT_SEND_TASK,
-    SPEECH_NOT_LOADED,
-    SPEECH_WHICH_ARM,
+    SPEECH,
     _speech_for_error,
     async_register_intents,
     async_setup_intents,
+    say,
 )
 from custom_components.ros2_bridge.models import Robot
 from custom_components.ros2_bridge.services import DATA_HUB
@@ -118,9 +126,9 @@ async def test_not_loaded_speech(hass: HomeAssistant) -> None:
     response = await handle(hass)
     assert response.response_type is intent.IntentResponseType.ERROR
     assert response.error_code is intent.IntentResponseErrorCode.FAILED_TO_HANDLE
-    assert speech(response) == SPEECH_NOT_LOADED
+    assert speech(response) == SPEECH["not_loaded"]
     response = await handle(hass, INTENT_CANCEL_TASK)
-    assert speech(response) == SPEECH_NOT_LOADED
+    assert speech(response) == SPEECH["not_loaded"]
 
 
 # --------------------------------------------------------------------------- the three outcomes
@@ -159,7 +167,7 @@ async def test_report_back_speech_without_waiting_for_the_result(
     await rig.announce()
     pending = start_handle(rig.hass, task="reset")
     await rig.until_published(CMD_TOPIC)
-    await advance(INTENT_ACK_WAIT_CAP_S + 0.1)
+    await advance(DEFAULT_INTENT_ACK_WAIT_S + 0.1)
     response = await pending
     assert response.response_type is intent.IntentResponseType.ACTION_DONE
     assert speech(response) == "Sent Reset to home to Left arm, I will report back"
@@ -305,13 +313,13 @@ async def test_only_robot_and_ambiguity(rig: HubRig) -> None:
     await rig.announce(OTHER_ROBOT)
     response = await handle(rig.hass, task="reset")
     assert response.response_type is intent.IntentResponseType.ERROR
-    assert speech(response) == SPEECH_WHICH_ARM
+    assert speech(response) == SPEECH["which_robot"]
     # Two robots in one area are just as ambiguous.
     place_robot(rig, ROBOT_ID, "Kitchen")
     kitchen = place_robot(rig, OTHER_ROBOT, "Kitchen")
-    assert speech(await handle(rig.hass, area="Kitchen")) == SPEECH_WHICH_ARM
+    assert speech(await handle(rig.hass, area="Kitchen")) == SPEECH["which_robot"]
     satellite = await satellite_in(rig, kitchen)
-    assert speech(await handle(rig.hass, device_id=satellite)) == SPEECH_WHICH_ARM
+    assert speech(await handle(rig.hass, device_id=satellite)) == SPEECH["which_robot"]
     assert len(rig.commands()) == 1
 
 
@@ -354,7 +362,7 @@ async def test_cancel_intent_outcomes(
 
     pending = start_handle(rig.hass, intent_type=INTENT_CANCEL_TASK)
     await rig.until_published(CMD_TOPIC, 3)
-    await advance(INTENT_ACK_WAIT_CAP_S + 0.1)
+    await advance(DEFAULT_INTENT_ACK_WAIT_S + 0.1)
     assert speech(await pending) == "Sent cancel to Left arm, I will report back"
 
 
@@ -379,7 +387,7 @@ async def test_still_handled_after_an_options_reload_and_after_unload(
     # An options save unloads the entry and sets it up again with the parked registry.
     await rig.hub.async_stop()
     rig.unload()
-    assert speech(await handle(rig.hass)) == SPEECH_NOT_LOADED
+    assert speech(await handle(rig.hass)) == SPEECH["not_loaded"]
     registry: CommandRegistry = rig.hub.registry
     reloaded = BridgeHub(rig.hass, rig.entry, registry, rig.store)
     await reloaded.async_start()
@@ -402,4 +410,43 @@ async def test_still_handled_after_an_options_reload_and_after_unload(
     }
     response = await handle(rig.hass)
     assert response.response_type is intent.IntentResponseType.ERROR
-    assert speech(response) == SPEECH_NOT_LOADED
+    assert speech(response) == SPEECH["not_loaded"]
+
+
+# --------------------------------------------------------------------------- intent_ack_wait_s
+
+
+@pytest.mark.parametrize("rig_options", [{CONF_INTENT_ACK_WAIT_S: 3.0, CONF_ACK_TIMEOUT_S: 5.0}])
+async def test_intent_ack_wait_option_lengthens_the_wait(
+    rig: HubRig, freezer: FrozenDateTimeFactory
+) -> None:
+    await rig.announce()
+    pending = start_handle(rig.hass, task="reset")
+    await rig.until_published(CMD_TOPIC)
+    freezer.tick(timedelta(seconds=DEFAULT_INTENT_ACK_WAIT_S + 0.5))
+    async_fire_time_changed(rig.hass, dt_util.utcnow())
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not pending.done(), "the released 1.5 s cap no longer applies"
+    rig.ack(rig.commands()[0]["id"])
+    response = await pending
+    assert speech(response) == "Starting Reset to home on Left arm"
+
+
+@pytest.mark.parametrize("rig_options", [{CONF_INTENT_ACK_WAIT_S: 5.0, CONF_ACK_TIMEOUT_S: 1.0}])
+async def test_intent_ack_wait_is_capped_by_the_ack_timeout(
+    rig: HubRig, advance: Callable[[float], Awaitable[None]]
+) -> None:
+    await rig.announce()
+    pending = start_handle(rig.hass, task="reset")
+    await rig.until_published(CMD_TOPIC)
+    await advance(1.2)
+    response = await pending
+    assert speech(response) == "Sent Reset to home to Left arm, I will report back"
+
+
+def test_speech_table_is_generic_and_complete() -> None:
+    """Every reply is one table entry and none presumes the robot is an arm."""
+    assert all("arm" not in text.casefold().split() for text in SPEECH.values())
+    assert SPEECH["which_robot"] == "Which robot do you mean?"
+    assert say("refused", robot="Left arm", reason="busy") == "Left arm refused: busy"

@@ -39,17 +39,19 @@ logged at DEBUG and reported as True; a QoS 0 publish while disconnected is
 lost and counted.
 
 Session takeover: a broker-sent DISCONNECT with reason code 142 ("Session
-taken over"), or any broker-sent DISCONNECT within :data:`TAKEOVER_SUSPECT_S`
-of a successful connect (Mosquitto 2.1 evicts the older client with reason
-code 0), means another client connected with the same client id, which
-for this node means another bridge process with the same ``robot.id``
+taken over"), or any broker-sent DISCONNECT within ``mqtt.takeover_suspect_s``
+(default :data:`TAKEOVER_SUSPECT_S`, 10 s; 0 switches the heuristic off) of a
+successful connect (Mosquitto 2.1 evicts the older client with reason code
+0), means another client connected with the same client id, which for this
+node means another bridge process with the same ``robot.id``
 (``mqtt.client_id`` is a function of it by design). The link logs an ERROR that
 says so, counts ``takeovers``, doubles the reconnect delay per takeover so two
 flapping nodes slow down rather than hammer the broker (paho resets its own
 backoff after each successful CONNACK, so the minimum must be raised here;
 the configured minimum is restored at the first connect or ordinary
-disconnect after ten minutes without a takeover), and after
-``mqtt.takeover_exit_after`` takeovers within ten minutes sets
+disconnect after a whole window without a takeover), and after
+``mqtt.takeover_exit_after`` takeovers within ``mqtt.takeover_window_s``
+(default :data:`TAKEOVER_WINDOW_S`, ten minutes) sets
 :attr:`MqttLink.should_exit`, which the node turns into a non-zero exit so the
 launch file's ``respawn_max_retries`` stops the flapping.
 
@@ -61,7 +63,8 @@ cannot be reached at all produces no CONNACK; paho reports that through
 ``mqtt.connect_timeout_s`` decides when to give up.
 
 Clean shutdown (:meth:`MqttLink.shutdown`): inbound is stopped, ``availability
-offline`` is published retained and waited for up to two seconds, then
+offline`` is published retained and waited for up to ``offline_wait_s``
+(the node passes ``mqtt.offline_wait_s``, default two seconds), then
 ``disconnect()`` and ``loop_stop()``. The paho client class is injectable
 (``client_factory``) so the unit tests run against ``test/fakes.py``'s
 ``FakeMqttClient`` and ``FakeBroker`` with no broker and no network.
@@ -137,17 +140,19 @@ DEFAULT_RECONNECT_MAX_S = 30
 DEFAULT_TAKEOVER_EXIT_AFTER = 3
 #: ``mqtt.inbound_queue_max`` default: the deque bound.
 DEFAULT_INBOUND_QUEUE_MAX = 256
-#: How long :meth:`MqttLink.shutdown` waits for the retained ``offline`` to be acknowledged.
+#: ``mqtt.offline_wait_s`` default: how long :meth:`MqttLink.shutdown` waits for the retained
+#: ``offline`` to be acknowledged before relying on the will.
 DEFAULT_OFFLINE_WAIT_S = 2.0
-#: Minimum spacing of the rate-limited WARN lines about dropped inbound messages.
+#: ``logging.warn_interval_s`` default: spacing of the rate-limited WARN lines about drops.
 DEFAULT_WARN_INTERVAL_S = 10.0
-#: Takeovers are counted within a sliding window this long (seconds).
+#: ``mqtt.takeover_window_s`` default: takeovers are counted within a sliding window this long.
 TAKEOVER_WINDOW_S = 600.0
 #: MQTT 5 DISCONNECT reason code "Session taken over".
 REASON_SESSION_TAKEN_OVER = 142
-#: A broker-sent DISCONNECT this soon after a successful connect is treated as a takeover
-#: even without reason code 142: Mosquitto 2.1 evicts the older holder of a duplicated
-#: client id with a plain broker-sent DISCONNECT (reason code 0), as the first live run showed.
+#: ``mqtt.takeover_suspect_s`` default. A broker-sent DISCONNECT this soon after a successful
+#: connect is treated as a takeover even without reason code 142: Mosquitto 2.1 evicts the
+#: older holder of a duplicated client id with a plain broker-sent DISCONNECT (reason code 0),
+#: as the first live run showed. 0 leaves reason code 142 as the only signal.
 TAKEOVER_SUSPECT_S = 10.0
 #: Key under which a TCP-level connection failure is logged once (no reason code exists).
 _UNREACHABLE_KEY = -1
@@ -198,8 +203,14 @@ class MqttLinkConfig:
     reconnect_min_s: int = DEFAULT_RECONNECT_MIN_S
     reconnect_max_s: int = DEFAULT_RECONNECT_MAX_S
     takeover_exit_after: int = DEFAULT_TAKEOVER_EXIT_AFTER
+    #: ``mqtt.takeover_suspect_s``: a broker-sent DISCONNECT within this many seconds of a
+    #: connect counts as a takeover whatever its reason code; 0 disables the heuristic.
+    takeover_suspect_s: float = TAKEOVER_SUSPECT_S
+    #: ``mqtt.takeover_window_s``: the sliding window the takeover count is measured over.
+    takeover_window_s: float = TAKEOVER_WINDOW_S
     max_payload_bytes: int = MAX_PAYLOAD_BYTES
     inbound_queue_max: int = DEFAULT_INBOUND_QUEUE_MAX
+    #: ``logging.warn_interval_s``; 0 warns on every event.
     warn_interval_s: float = DEFAULT_WARN_INTERVAL_S
 
     def __post_init__(self) -> None:
@@ -217,6 +228,10 @@ class MqttLinkConfig:
             raise ValueError('mqtt.reconnect_max_s must not be below mqtt.reconnect_min_s')
         if self.takeover_exit_after < 0:
             raise ValueError('mqtt.takeover_exit_after must not be negative (0 disables)')
+        if self.takeover_suspect_s < 0:
+            raise ValueError('mqtt.takeover_suspect_s must not be negative (0 disables)')
+        if self.takeover_window_s <= 0:
+            raise ValueError('mqtt.takeover_window_s must be greater than 0')
         if self.max_payload_bytes < 1:
             raise ValueError('mqtt.max_payload_bytes must be at least 1')
         if self.inbound_queue_max < 1:
@@ -451,7 +466,7 @@ class MqttLink:
 
     @property
     def takeovers_in_window(self) -> int:
-        """Session takeovers seen within the last :data:`TAKEOVER_WINDOW_S` seconds."""
+        """Session takeovers seen within the last ``mqtt.takeover_window_s`` seconds."""
         self._prune_takeovers(self._clock.monotonic())
         return len(self._takeover_times)
 
@@ -722,13 +737,16 @@ class MqttLink:
             taken_over_by_code = code == REASON_SESSION_TAKEN_OVER
             # Mosquitto 2.1 evicts the older client of a duplicated client id with a plain
             # broker-sent DISCONNECT (reason code 0) rather than 142, so a broker-initiated
-            # disconnect this soon after a successful connect counts as a takeover as well.
+            # disconnect this soon after a successful connect counts as a takeover as well
+            # (mqtt.takeover_suspect_s; 0 switches this heuristic off).
             connected_at = self._connected_at
+            suspect_s = self.config.takeover_suspect_s
             suspect = (
                 not taken_over_by_code
                 and from_server
+                and suspect_s > 0
                 and connected_at is not None
-                and self._clock.monotonic() - connected_at < TAKEOVER_SUSPECT_S
+                and self._clock.monotonic() - connected_at < suspect_s
             )
             taken_over = taken_over_by_code or suspect
             exit_requested = self._on_takeover(code, name) if taken_over else False
@@ -852,7 +870,8 @@ class MqttLink:
         )
 
     def _prune_takeovers(self, now: float) -> None:
-        while self._takeover_times and now - self._takeover_times[0] > TAKEOVER_WINDOW_S:
+        window_s = self.config.takeover_window_s
+        while self._takeover_times and now - self._takeover_times[0] > window_s:
             self._takeover_times.popleft()
 
     def _restore_backoff_if_quiet(self) -> None:
@@ -868,20 +887,21 @@ class MqttLink:
         self._client.reconnect_delay_set(self.config.reconnect_min_s, self.config.reconnect_max_s)
         self._logger.info(
             'no session takeover for %g minutes; reconnect delay restored to %d to %d s',
-            TAKEOVER_WINDOW_S / 60,
+            self.config.takeover_window_s / 60,
             self.config.reconnect_min_s,
             self.config.reconnect_max_s,
         )
 
     def _on_takeover(self, code: int, name: str) -> bool:
         """Count a takeover, back off, and decide whether the node must exit. Returns the decision."""
+        window_minutes = self.config.takeover_window_s / 60
         if code == REASON_SESSION_TAKEN_OVER:
             how = f'reason code {code}, "{name}"'
         else:
             how = (
                 f'the broker closed the connection with reason code {code} ("{name}") within '
-                f'{TAKEOVER_SUSPECT_S:g} s of connecting, which is how it evicts a client id that '
-                'another connection claimed'
+                f'mqtt.takeover_suspect_s ({self.config.takeover_suspect_s:g} s) of connecting, '
+                'which is how it evicts a client id that another connection claimed'
             )
         now = self._clock.monotonic()
         self._prune_takeovers(now)
@@ -896,7 +916,7 @@ class MqttLink:
         if exit_now:
             self._exit_reason = (
                 f'MQTT session for client id {self.config.client_id!r} taken over '
-                f'{count} times within {TAKEOVER_WINDOW_S / 60:g} minutes'
+                f'{count} times within {window_minutes:g} minutes'
             )
         self._logger.error(
             'MQTT session for client id %r was taken over by another connection (%s): most '
@@ -906,7 +926,7 @@ class MqttLink:
             how,
             count,
             f' of {limit}' if limit > 0 else '',
-            TAKEOVER_WINDOW_S / 60,
+            window_minutes,
             delay,
             '; this node will now exit so the launch file can stop the flapping'
             if exit_now

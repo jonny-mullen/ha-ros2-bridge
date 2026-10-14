@@ -12,6 +12,12 @@
 # ignored by git). The defaults below are placeholders, never a real host or account.
 # The password and the command secret reach the node only as environment variables,
 # which the node reads when the matching parameter is empty.
+#
+# Parameters. The entrypoint renders the six named variables below into a parameters file;
+# every other node parameter is set either through a mounted file (ROS2_HA_BRIDGE_PARAMS_FILE
+# plus a volume) or through ROS2_HA_BRIDGE_PARAM_<NAME> variables (dotted name in upper case,
+# dots as double underscores), which must be listed under a service's "environment:" or passed
+# with -e on docker compose run. tools/README.md, "What the entrypoint reads", has the table.
 
 name: ha-ros2-bridge
 
@@ -22,9 +28,12 @@ x-bridge-environment: &bridge-environment
   ROS2_HA_BRIDGE_MQTT_PASSWORD: ${ROS2_HA_BRIDGE_MQTT_PASSWORD:-}
   ROS2_HA_BRIDGE_COMMAND_SECRET: ${ROS2_HA_BRIDGE_COMMAND_SECRET:-}
   TOPIC_PREFIX: ${TOPIC_PREFIX:-ros2_bridge}
+  # A parameters file inside the container to start from (mount it; see the volumes below).
+  ROS2_HA_BRIDGE_PARAMS_FILE: ${ROS2_HA_BRIDGE_PARAMS_FILE:-}
   ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
-  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
-  ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+  # DDS isolation (header above and tools/README.md, Networking); overridable from .env.
+  RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+  ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-LOCALHOST}
 
 x-bridge-service: &bridge-service
   image: ha-ros2-bridge:dev
@@ -47,6 +56,17 @@ services:
       <<: *bridge-environment
       ROS2_HA_BRIDGE_ROBOT_ID: fake_arm_1
       ROS2_HA_BRIDGE_ROBOT_NAME: Fake arm 1
+      # Any other node parameter, typed from the node's own table (docs/configuration.md):
+      # ROS2_HA_BRIDGE_PARAM_WATCHDOG__MODE: inhibit_new
+      # ROS2_HA_BRIDGE_PARAM_TELEMETRY__JOINTS_RATE_HZ: "5"
+      # ROS2_HA_BRIDGE_PARAM_TASKS__ALLOW: reset,stop,move_to
+    # Uncomment to start from your own parameters file (set ROS2_HA_BRIDGE_PARAMS_FILE to
+    # /params.yaml in .env), to mount a TLS certificate the file names, and to keep the dedupe
+    # store (data_dir) across "docker compose down" and "up"; the rig keeps no state otherwise.
+    # volumes:
+    #   - ./my_params.yaml:/params.yaml:ro
+    #   - ./ca.pem:/certs/ca.pem:ro
+    #   - arm1-data:/root/.ros/ros2_ha_bridge
 
   arm2:
     <<: *bridge-service
@@ -55,6 +75,9 @@ services:
       <<: *bridge-environment
       ROS2_HA_BRIDGE_ROBOT_ID: fake_arm_2
       ROS2_HA_BRIDGE_ROBOT_NAME: Fake arm 2
+    # volumes:
+    #   - ./my_params.yaml:/params.yaml:ro
+    #   - arm2-data:/root/.ros/ros2_ha_bridge
 
   # colcon test inside the image, then colcon test-result --verbose (its exit code is the
   # container's). Run with: docker compose run --rm test
@@ -113,3 +136,10 @@ networks:
   rig:
     name: ha-ros2-bridge
     driver: bridge
+
+# Named volumes for the dedupe stores (data_dir), used by the commented volumes blocks above.
+# Off by default: the rig is disposable, and a store that outlives "docker compose down" is a
+# deliberate choice for a persistence test, not the normal run.
+# volumes:
+#   arm1-data:
+#   arm2-data:

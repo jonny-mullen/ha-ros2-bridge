@@ -6,9 +6,12 @@
 eight wildcard subscriptions on Home Assistant's own MQTT connection with
 synchronous handlers, watches the ack and result subscriptions for ``ready``
 (bounded by ``READY_TIMEOUT_S``), follows the MQTT connection status, runs the
-HA heartbeat and the 1 s housekeeping timer, and after a ``REPLAY_SETTLE_S``
-quiet period reconciles the outstanding commands of the ``CommandRegistry``
-against what the retained replay said about each robot.
+HA heartbeat and the 1 s housekeeping timer, and after the ``replay_settle_s``
+option's quiet period reconciles the outstanding commands of the
+``CommandRegistry`` against what the retained replay said about each robot.
+Every timing and heuristic the hub applies is an option of ``HubOptions``
+(with the defaults in ``const.py``); the few constants left are the
+contract's own bounds.
 
 Every handler first checks the topic's robot segment (``ha`` is discarded
 silently, anything failing the pattern with a count), then decodes the payload
@@ -56,45 +59,65 @@ from .const import (
     ACK_CODE_FUTURE,
     ACK_CODE_STALE,
     ACK_CODE_UNAUTHORISED,
-    CLOCK_SKEW_WARN_MS,
+    CONF_ACK_EXPIRY_S,
     CONF_ACK_TIMEOUT_S,
+    CONF_CLOCK_SKEW_WARN_MS,
     CONF_COMMAND_MAX_AGE_MS,
+    CONF_DUPLICATE_QUIET_S,
+    CONF_DUPLICATE_SESSION_CHANGES,
+    CONF_DUPLICATE_SESSION_WINDOW_S,
+    CONF_FEEDBACK_THROTTLE_MS,
     CONF_HEARTBEAT_INTERVAL_S,
+    CONF_HEARTBEAT_STALE_INTERVALS,
     CONF_HEARTBEAT_UNAVAILABLE_AFTER_S,
     CONF_INSTANCE_ID,
+    CONF_INTENT_ACK_WAIT_S,
+    CONF_JOINT_MOVING_HOLD_S,
+    CONF_JOINT_MOVING_THRESHOLD,
     CONF_MAX_PENDING_PER_ROBOT,
     CONF_MIRROR_ENTITIES,
+    CONF_MIRROR_EXTRA_ATTRIBUTES,
+    CONF_REPLAY_SETTLE_S,
+    CONF_RESULT_EXPIRY_S,
     CONF_RESULT_TIMEOUT_MARGIN_S,
+    CONF_SESSION_CHANGE_GRACE_S,
     CONF_SHARED_SECRET,
     CONF_TOPIC_PREFIX,
+    DEFAULT_ACK_EXPIRY_S,
     DEFAULT_ACK_TIMEOUT_S,
+    DEFAULT_CLOCK_SKEW_WARN_MS,
     DEFAULT_COMMAND_MAX_AGE_MS,
+    DEFAULT_DUPLICATE_QUIET_S,
+    DEFAULT_DUPLICATE_SESSION_CHANGES,
+    DEFAULT_DUPLICATE_SESSION_WINDOW_S,
+    DEFAULT_FEEDBACK_THROTTLE_MS,
     DEFAULT_HEARTBEAT_INTERVAL_S,
+    DEFAULT_HEARTBEAT_STALE_INTERVALS,
     DEFAULT_HEARTBEAT_UNAVAILABLE_AFTER_S,
+    DEFAULT_INTENT_ACK_WAIT_S,
+    DEFAULT_JOINT_MOVING_HOLD_S,
+    DEFAULT_JOINT_MOVING_THRESHOLD,
     DEFAULT_MAX_PENDING_PER_ROBOT,
+    DEFAULT_REPLAY_SETTLE_S,
+    DEFAULT_RESULT_EXPIRY_S,
     DEFAULT_RESULT_TIMEOUT_MARGIN_S,
+    DEFAULT_SESSION_CHANGE_GRACE_S,
     DEFAULT_SHARED_SECRET,
     DEFAULT_TOPIC_PREFIX,
     DIAGNOSTICS_RECENT_COMMANDS,
     DOMAIN,
-    DUPLICATE_QUIET_S,
-    DUPLICATE_SESSION_CHANGES,
-    DUPLICATE_SESSION_WINDOW_S,
     EVENT_TASK_RESULT,
-    FEEDBACK_THROTTLE_MS,
     HA_HEARTBEAT_EXPIRY_S,
-    HEARTBEAT_STALE_INTERVALS,
     HOUSEKEEPING_INTERVAL_S,
     ISSUE_CLOCK_SKEW,
     ISSUE_DUPLICATE_ROBOT_ID,
     ISSUE_HMAC_REJECTED,
     ISSUE_INVALID_ANNOUNCE,
     ISSUE_MQTT_V5_REQUIRED,
+    JOINT_MOVING_DEFAULT_THRESHOLDS,
     READY_TIMEOUT_S,
-    REPLAY_SETTLE_S,
     RESERVED_ROBOT_ID,
     SCHEMA_VERSION,
-    SESSION_CHANGE_GRACE_S,
     SIGNAL_CONNECTION_CHANGED,
     SIGNAL_ROBOT_ADDED,
     SIGNAL_ROBOT_JOINTS_CHANGED,
@@ -106,6 +129,7 @@ from .const import (
     Availability,
     CommandType,
     HealthLevel,
+    JointUnit,
     RobotStatus,
     TaskKind,
     TaskOutcome,
@@ -124,7 +148,7 @@ from .const import (
     state_filter,
     state_topic,
 )
-from .models import Announce, JointInfo, LastResult, PendingCommand, Robot, TaskSpec
+from .models import Announce, JointInfo, Joints, LastResult, PendingCommand, Robot, TaskSpec
 from .protocol import (
     CommandSource,
     ProtocolError,
@@ -176,33 +200,74 @@ class HubOptions:
     max_pending_per_robot: int = DEFAULT_MAX_PENDING_PER_ROBOT
     heartbeat_unavailable_after_s: float = DEFAULT_HEARTBEAT_UNAVAILABLE_AFTER_S
     mirror_entities: tuple[str, ...] = ()
+    mirror_extra_attributes: tuple[str, ...] = ()
+    intent_ack_wait_s: float = DEFAULT_INTENT_ACK_WAIT_S
+    #: ``0`` means the announced unit's default; see :meth:`joint_moving_threshold_for`.
+    joint_moving_threshold: float = DEFAULT_JOINT_MOVING_THRESHOLD
+    #: ``0`` means two publication intervals of the announced rate; see :func:`_moving_hold_ms`.
+    joint_moving_hold_s: float = DEFAULT_JOINT_MOVING_HOLD_S
+    # The advanced section: timings shared with the node and the heuristics of two repairs.
+    ack_expiry_s: float = DEFAULT_ACK_EXPIRY_S
+    result_expiry_s: float = DEFAULT_RESULT_EXPIRY_S
+    replay_settle_s: float = DEFAULT_REPLAY_SETTLE_S
+    session_change_grace_s: float = DEFAULT_SESSION_CHANGE_GRACE_S
+    feedback_throttle_ms: int = DEFAULT_FEEDBACK_THROTTLE_MS
+    heartbeat_stale_intervals: int = DEFAULT_HEARTBEAT_STALE_INTERVALS
+    clock_skew_warn_ms: int = DEFAULT_CLOCK_SKEW_WARN_MS
+    duplicate_session_changes: int = DEFAULT_DUPLICATE_SESSION_CHANGES
+    duplicate_session_window_s: float = DEFAULT_DUPLICATE_SESSION_WINDOW_S
+    duplicate_quiet_s: float = DEFAULT_DUPLICATE_QUIET_S
 
     @classmethod
     def from_mapping(cls, options: Mapping[str, Any]) -> HubOptions:
         """Build from ``entry.options``; absent keys take the defaults."""
+
+        def number(key: str, default: float) -> float:
+            return float(options.get(key, default))
+
+        def count(key: str, default: int) -> int:
+            return int(options.get(key, default))
+
         mirror = options.get(CONF_MIRROR_ENTITIES) or ()
+        extra = options.get(CONF_MIRROR_EXTRA_ATTRIBUTES) or ()
         return cls(
             topic_prefix=str(options.get(CONF_TOPIC_PREFIX, DEFAULT_TOPIC_PREFIX)),
             shared_secret=str(options.get(CONF_SHARED_SECRET) or DEFAULT_SHARED_SECRET),
-            heartbeat_interval_s=float(
-                options.get(CONF_HEARTBEAT_INTERVAL_S, DEFAULT_HEARTBEAT_INTERVAL_S)
+            heartbeat_interval_s=number(CONF_HEARTBEAT_INTERVAL_S, DEFAULT_HEARTBEAT_INTERVAL_S),
+            ack_timeout_s=number(CONF_ACK_TIMEOUT_S, DEFAULT_ACK_TIMEOUT_S),
+            command_max_age_ms=count(CONF_COMMAND_MAX_AGE_MS, DEFAULT_COMMAND_MAX_AGE_MS),
+            result_timeout_margin_s=number(
+                CONF_RESULT_TIMEOUT_MARGIN_S, DEFAULT_RESULT_TIMEOUT_MARGIN_S
             ),
-            ack_timeout_s=float(options.get(CONF_ACK_TIMEOUT_S, DEFAULT_ACK_TIMEOUT_S)),
-            command_max_age_ms=int(
-                options.get(CONF_COMMAND_MAX_AGE_MS, DEFAULT_COMMAND_MAX_AGE_MS)
-            ),
-            result_timeout_margin_s=float(
-                options.get(CONF_RESULT_TIMEOUT_MARGIN_S, DEFAULT_RESULT_TIMEOUT_MARGIN_S)
-            ),
-            max_pending_per_robot=int(
-                options.get(CONF_MAX_PENDING_PER_ROBOT, DEFAULT_MAX_PENDING_PER_ROBOT)
-            ),
-            heartbeat_unavailable_after_s=float(
-                options.get(
-                    CONF_HEARTBEAT_UNAVAILABLE_AFTER_S, DEFAULT_HEARTBEAT_UNAVAILABLE_AFTER_S
-                )
+            max_pending_per_robot=count(CONF_MAX_PENDING_PER_ROBOT, DEFAULT_MAX_PENDING_PER_ROBOT),
+            heartbeat_unavailable_after_s=number(
+                CONF_HEARTBEAT_UNAVAILABLE_AFTER_S, DEFAULT_HEARTBEAT_UNAVAILABLE_AFTER_S
             ),
             mirror_entities=tuple(str(entity_id) for entity_id in mirror),
+            mirror_extra_attributes=tuple(str(name) for name in extra),
+            intent_ack_wait_s=number(CONF_INTENT_ACK_WAIT_S, DEFAULT_INTENT_ACK_WAIT_S),
+            joint_moving_threshold=number(
+                CONF_JOINT_MOVING_THRESHOLD, DEFAULT_JOINT_MOVING_THRESHOLD
+            ),
+            joint_moving_hold_s=number(CONF_JOINT_MOVING_HOLD_S, DEFAULT_JOINT_MOVING_HOLD_S),
+            ack_expiry_s=number(CONF_ACK_EXPIRY_S, DEFAULT_ACK_EXPIRY_S),
+            result_expiry_s=number(CONF_RESULT_EXPIRY_S, DEFAULT_RESULT_EXPIRY_S),
+            replay_settle_s=number(CONF_REPLAY_SETTLE_S, DEFAULT_REPLAY_SETTLE_S),
+            session_change_grace_s=number(
+                CONF_SESSION_CHANGE_GRACE_S, DEFAULT_SESSION_CHANGE_GRACE_S
+            ),
+            feedback_throttle_ms=count(CONF_FEEDBACK_THROTTLE_MS, DEFAULT_FEEDBACK_THROTTLE_MS),
+            heartbeat_stale_intervals=count(
+                CONF_HEARTBEAT_STALE_INTERVALS, DEFAULT_HEARTBEAT_STALE_INTERVALS
+            ),
+            clock_skew_warn_ms=count(CONF_CLOCK_SKEW_WARN_MS, DEFAULT_CLOCK_SKEW_WARN_MS),
+            duplicate_session_changes=count(
+                CONF_DUPLICATE_SESSION_CHANGES, DEFAULT_DUPLICATE_SESSION_CHANGES
+            ),
+            duplicate_session_window_s=number(
+                CONF_DUPLICATE_SESSION_WINDOW_S, DEFAULT_DUPLICATE_SESSION_WINDOW_S
+            ),
+            duplicate_quiet_s=number(CONF_DUPLICATE_QUIET_S, DEFAULT_DUPLICATE_QUIET_S),
         )
 
     @classmethod
@@ -215,11 +280,20 @@ class HubOptions:
         return self.shared_secret or None
 
     def registry_settings(self) -> RegistrySettings:
+        """The registry's share: the timeouts, the pending cap and the node's two expiries."""
         return RegistrySettings(
             ack_timeout_s=self.ack_timeout_s,
             result_timeout_margin_s=self.result_timeout_margin_s,
             max_pending_per_robot=self.max_pending_per_robot,
+            result_expiry_s=self.result_expiry_s,
+            ack_expiry_s=self.ack_expiry_s,
         )
+
+    def joint_moving_threshold_for(self, unit: JointUnit) -> float:
+        """The ``moving`` threshold in ``unit``: the option, or the unit's default when it is 0."""
+        if self.joint_moving_threshold > 0:
+            return self.joint_moving_threshold
+        return JOINT_MOVING_DEFAULT_THRESHOLDS[unit]
 
     def to_dict(self, *, redact_secret: bool = True) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -231,6 +305,20 @@ class HubOptions:
             CONF_MAX_PENDING_PER_ROBOT: self.max_pending_per_robot,
             CONF_HEARTBEAT_UNAVAILABLE_AFTER_S: self.heartbeat_unavailable_after_s,
             CONF_MIRROR_ENTITIES: list(self.mirror_entities),
+            CONF_MIRROR_EXTRA_ATTRIBUTES: list(self.mirror_extra_attributes),
+            CONF_INTENT_ACK_WAIT_S: self.intent_ack_wait_s,
+            CONF_JOINT_MOVING_THRESHOLD: self.joint_moving_threshold,
+            CONF_JOINT_MOVING_HOLD_S: self.joint_moving_hold_s,
+            CONF_ACK_EXPIRY_S: self.ack_expiry_s,
+            CONF_RESULT_EXPIRY_S: self.result_expiry_s,
+            CONF_REPLAY_SETTLE_S: self.replay_settle_s,
+            CONF_SESSION_CHANGE_GRACE_S: self.session_change_grace_s,
+            CONF_FEEDBACK_THROTTLE_MS: self.feedback_throttle_ms,
+            CONF_HEARTBEAT_STALE_INTERVALS: self.heartbeat_stale_intervals,
+            CONF_CLOCK_SKEW_WARN_MS: self.clock_skew_warn_ms,
+            CONF_DUPLICATE_SESSION_CHANGES: self.duplicate_session_changes,
+            CONF_DUPLICATE_SESSION_WINDOW_S: self.duplicate_session_window_s,
+            CONF_DUPLICATE_QUIET_S: self.duplicate_quiet_s,
         }
         if redact_secret:
             data["secret_configured"] = self.secret is not None
@@ -468,7 +556,7 @@ class BridgeHub:
         if self.ready and self.mqtt_connected:
             if self._settle_handle is None:
                 self._settle_handle = async_call_later(
-                    self.hass, REPLAY_SETTLE_S, self._on_settle_expired
+                    self.hass, self.options.replay_settle_s, self._on_settle_expired
                 )
         else:
             self._cancel_settle_timer()
@@ -531,17 +619,26 @@ class BridgeHub:
             if (
                 robot.duplicate_open
                 and robot.duplicate_evidence_at is not None
-                and now - robot.duplicate_evidence_at >= DUPLICATE_QUIET_S * 1000
+                and now - robot.duplicate_evidence_at >= self.options.duplicate_quiet_s * 1000
             ):
                 robot.duplicate_open = False
                 self._close_issue(ISSUE_DUPLICATE_ROBOT_ID, robot_id)
                 self._dispatch_updated(robot_id)
             if robot_id in self._feedback_pending and (
-                now - self._feedback_sent_at.get(robot_id, 0) >= FEEDBACK_THROTTLE_MS
+                now - self._feedback_sent_at.get(robot_id, 0) >= self.options.feedback_throttle_ms
             ):
                 self._feedback_pending.discard(robot_id)
                 self._feedback_sent_at[robot_id] = now
                 self._dispatch_updated(robot_id)
+            if robot.joints_moving_until is not None and now >= robot.joints_moving_until:
+                self._expire_joint_moving(robot)
+
+    def _expire_joint_moving(self, robot: Robot) -> None:
+        """No newer joints payload within the hold window: every joint counts as still."""
+        robot.joints_moving_until = None
+        if robot.joint_moving is not None and any(robot.joint_moving):
+            robot.joint_moving = tuple(False for _ in robot.joint_moving)
+            async_dispatcher_send(self.hass, SIGNAL_ROBOT_JOINTS_UPDATED, robot.robot_id)
 
     def _check_staleness(self, robot: Robot, now: int) -> bool:
         """Update the heartbeat flags of one robot; True when either changed."""
@@ -553,7 +650,7 @@ class BridgeHub:
             return changed
         reference = robot.last_heartbeat_at or robot.first_seen_at or now
         age_ms = now - reference
-        stale = age_ms > interval * HEARTBEAT_STALE_INTERVALS * 1000
+        stale = age_ms > interval * self.options.heartbeat_stale_intervals * 1000
         after_s = self.options.heartbeat_unavailable_after_s
         unavailable = after_s > 0 and age_ms > after_s * 1000
         changed = stale != robot.heartbeat_stale or unavailable != robot.heartbeat_unavailable
@@ -719,6 +816,8 @@ class BridgeHub:
                 # The positions held so far belong to the old layout (or unit); the node
                 # publishes a fresh set with every announce, so nothing is lost by waiting.
                 robot.joints = None
+                robot.joint_moving = None
+                robot.joints_moving_until = None
                 async_dispatcher_send(
                     self.hass, SIGNAL_ROBOT_JOINTS_CHANGED, robot_id, added, removed
                 )
@@ -764,14 +863,14 @@ class BridgeHub:
                 session_changed = True
                 robot.session_change_count += 1
                 robot.session_changes.append(now)
-                window = DUPLICATE_SESSION_WINDOW_S * 1000
+                window = int(self.options.duplicate_session_window_s * 1000)
                 robot.session_changes = [t for t in robot.session_changes if now - t <= window]
-                if len(robot.session_changes) > DUPLICATE_SESSION_CHANGES:
+                if len(robot.session_changes) > self.options.duplicate_session_changes:
                     self._duplicate_evidence(
                         robot,
                         now,
                         f"{len(robot.session_changes)} session changes in "
-                        f"{DUPLICATE_SESSION_WINDOW_S // 60} minutes",
+                        f"{_duration_text(self.options.duplicate_session_window_s)}",
                     )
                 _LOGGER.info("Robot %s has a new session (node restarted)", robot.robot_id)
             robot.session = session
@@ -784,7 +883,7 @@ class BridgeHub:
         robot.instances_seen_at = {
             key: seen_at
             for key, seen_at in robot.instances_seen_at.items()
-            if now - seen_at <= DUPLICATE_SESSION_WINDOW_S * 1000
+            if now - seen_at <= self.options.duplicate_session_window_s * 1000
         }
         robot.instance = instance
         return session_changed
@@ -797,7 +896,11 @@ class BridgeHub:
             self._open_issue(
                 ISSUE_DUPLICATE_ROBOT_ID,
                 robot.robot_id,
-                {"robot_id": robot.robot_id, "detail": detail},
+                {
+                    "robot_id": robot.robot_id,
+                    "detail": detail,
+                    "quiet_minutes": _minutes_text(self.options.duplicate_quiet_s),
+                },
             )
             self._dispatch_updated(robot.robot_id)
 
@@ -806,7 +909,9 @@ class BridgeHub:
         if handle is not None:
             handle()
         self._grace_handles[robot_id] = async_call_later(
-            self.hass, SESSION_CHANGE_GRACE_S, partial(self._on_grace_expired, robot_id)
+            self.hass,
+            self.options.session_change_grace_s,
+            partial(self._on_grace_expired, robot_id),
         )
 
     @callback
@@ -946,7 +1051,7 @@ class BridgeHub:
         robot_id = robot.robot_id
         skew = ack.clock_skew_ms
         skewed = ack.code in (ACK_CODE_STALE, ACK_CODE_FUTURE) or (
-            skew is not None and abs(skew) >= CLOCK_SKEW_WARN_MS
+            skew is not None and abs(skew) >= self.options.clock_skew_warn_ms
         )
         if skewed:
             robot.clock_skew_open = True
@@ -997,7 +1102,7 @@ class BridgeHub:
             return
         robot.feedback = feedback
         now = self.now
-        if now - self._feedback_sent_at.get(robot_id, 0) >= FEEDBACK_THROTTLE_MS:
+        if now - self._feedback_sent_at.get(robot_id, 0) >= self.options.feedback_throttle_ms:
             self._feedback_sent_at[robot_id] = now
             self._feedback_pending.discard(robot_id)
             self._dispatch_updated(robot_id)
@@ -1066,10 +1171,43 @@ class BridgeHub:
             )
             return
         robot.joints = joints
+        robot.joint_moving = self._joint_moving(info, previous, joints)
+        robot.joints_moving_until = self.now + _moving_hold_ms(
+            info.rate_hz, self.options.joint_moving_hold_s
+        )
         session_changed = self._note_identity(robot, joints.session, joints.instance, self.now)
         async_dispatcher_send(self.hass, SIGNAL_ROBOT_JOINTS_UPDATED, robot_id)
         if session_changed:
             self._schedule_grace(robot_id)
+
+    def _joint_moving(
+        self, info: JointInfo, previous: Joints | None, current: Joints
+    ) -> tuple[bool, ...]:
+        """Per joint: the reported velocity beyond the threshold when the payload carries
+        velocities, otherwise a position that moved by more than it since the previous
+        payload.
+
+        A payload with velocities is the robot's own statement, so a reported 0
+        means at rest even when the position still changed since the previous
+        payload (the fake executor's arrival report, a settling ``joint_states``
+        sample); the position delta decides only for a robot that sends none.
+        The comparison is strict (``>``), the node's own rule for
+        ``telemetry.joints_min_delta``, so with the default threshold (the node's
+        default delta) every movement the node thought worth publishing counts.
+        The flags stand until the next payload or, with none, until
+        :func:`_moving_hold_ms` has passed, when housekeeping clears them.
+        """
+        threshold = self.options.joint_moving_threshold_for(info.unit)
+        if current.velocities is not None:
+            return tuple(abs(velocity) > threshold for velocity in current.velocities)
+        flags: list[bool] = []
+        for index, position in enumerate(current.positions):
+            flags.append(
+                previous is not None
+                and index < len(previous.positions)
+                and abs(position - previous.positions[index]) > threshold
+            )
+        return tuple(flags)
 
     @callback
     def _on_result(self, msg: ReceiveMessage) -> None:
@@ -1546,6 +1684,7 @@ class BridgeHub:
                     }
                 ),
                 "joints": None if robot.joints is None else robot.joints.to_dict(),
+                "joint_moving": None if robot.joint_moving is None else list(robot.joint_moving),
                 "pending": [c.task_id for c in self.registry.outstanding(robot_id)],
                 "problem_reasons": self.problem_reasons(robot_id),
             }
@@ -1613,6 +1752,31 @@ async def async_clear_robot_topics(hass: HomeAssistant, prefix: str, robot_id: s
             failures += 1
             _LOGGER.warning("Could not clear %s: %s", topic, error)
     return failures
+
+
+def _minutes_text(seconds: float) -> str:
+    """``600`` as ``"10"`` and ``90`` as ``"1.5"``: the ``{quiet_minutes}`` of the repair text."""
+    return f"{seconds / 60:g}"
+
+
+def _duration_text(seconds: float) -> str:
+    """A window as whole minutes when it is one (``5 minutes``), otherwise in seconds (``90 s``)."""
+    if seconds >= 60 and seconds % 60 == 0:
+        minutes = int(seconds // 60)
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    return f"{seconds:g} s"
+
+
+def _moving_hold_ms(rate_hz: float, hold_s: float = DEFAULT_JOINT_MOVING_HOLD_S) -> int:
+    """How long one payload's movement evidence stands: the ``joint_moving_hold_s``
+    option or, when it is 0, two publication intervals of the announced rate; never
+    less than one housekeeping tick, the resolution at which it is cleared."""
+    tick_ms = HOUSEKEEPING_INTERVAL_S * 1000
+    if hold_s > 0:
+        return max(tick_ms, math.ceil(hold_s * 1000))
+    if rate_hz <= 0:
+        return tick_ms
+    return max(tick_ms, math.ceil(2000 / rate_hz))
 
 
 def _joint_diff(

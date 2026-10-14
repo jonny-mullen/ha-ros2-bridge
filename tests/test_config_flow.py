@@ -7,7 +7,8 @@ instance rule (Home Assistant's own pre-emption and the flow's in-progress
 check), MQTT discovery through the confirm step to an entry, every junk
 discovery, and the options flow with its reload. ``async_setup_entry`` is
 patched in while the entry is created, as Home Assistant's own flow tests do,
-so these tests do not depend on the hub wiring in ``__init__.py``.
+so these tests do not depend on the hub wiring in ``__init__.py``. The options
+form carries a collapsed advanced section; the stored document stays flat.
 """
 
 from __future__ import annotations
@@ -16,10 +17,11 @@ import json
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
+import probatio
 import pytest
 from homeassistant.config_entries import SOURCE_MQTT, SOURCE_USER, ConfigEntryState
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResultType, InvalidData
+from homeassistant.data_entry_flow import FlowResultType, InvalidData, section
 from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -30,28 +32,46 @@ from custom_components.ros2_bridge.config_flow import (
     ABORT_SINGLE_INSTANCE,
     ERROR_INVALID_PREFIX,
     TITLE,
+    flatten_options,
+    nest_options,
     normalise_options,
     parse_discovery,
     validate_prefix,
 )
 from custom_components.ros2_bridge.const import (
+    ADVANCED_OPTIONS,
+    CONF_ACK_EXPIRY_S,
     CONF_ACK_TIMEOUT_S,
+    CONF_CLOCK_SKEW_WARN_MS,
     CONF_COMMAND_MAX_AGE_MS,
+    CONF_DUPLICATE_QUIET_S,
+    CONF_DUPLICATE_SESSION_CHANGES,
+    CONF_DUPLICATE_SESSION_WINDOW_S,
+    CONF_FEEDBACK_THROTTLE_MS,
     CONF_HEARTBEAT_INTERVAL_S,
+    CONF_HEARTBEAT_STALE_INTERVALS,
     CONF_HEARTBEAT_UNAVAILABLE_AFTER_S,
     CONF_INSTANCE_ID,
+    CONF_INTENT_ACK_WAIT_S,
+    CONF_JOINT_MOVING_HOLD_S,
+    CONF_JOINT_MOVING_THRESHOLD,
     CONF_MAX_PENDING_PER_ROBOT,
     CONF_MIRROR_ENTITIES,
+    CONF_MIRROR_EXTRA_ATTRIBUTES,
+    CONF_REPLAY_SETTLE_S,
+    CONF_RESULT_EXPIRY_S,
     CONF_RESULT_TIMEOUT_MARGIN_S,
+    CONF_SESSION_CHANGE_GRACE_S,
     CONF_SHARED_SECRET,
     CONF_TOPIC_PREFIX,
     DEFAULT_OPTIONS,
     DEFAULT_TOPIC_PREFIX,
     DOMAIN,
     ISSUE_KINDS,
+    SECTION_ADVANCED,
     TASK_ID_RE,
 )
-from custom_components.ros2_bridge.hub import BridgeHub
+from custom_components.ros2_bridge.hub import BridgeHub, HubOptions
 from custom_components.ros2_bridge.protocol import CommandSource
 
 from .common import REPO_ROOT, ROBOT_ID, announce_payload, encode, fire_robot_message
@@ -122,20 +142,20 @@ class patch_setup_entry:
 
 
 def options_input(**overrides: Any) -> dict[str, Any]:
-    """An options form submission as the frontend sends it (numbers as floats)."""
+    """An options form submission as the frontend sends it.
+
+    Numbers arrive as floats and the advanced options nested under the section;
+    ``overrides`` are given flat and nested here.
+    """
     data: dict[str, Any] = {
-        CONF_TOPIC_PREFIX: DEFAULT_TOPIC_PREFIX,
-        CONF_SHARED_SECRET: "",
-        CONF_HEARTBEAT_INTERVAL_S: 2.0,
-        CONF_ACK_TIMEOUT_S: 2.0,
-        CONF_COMMAND_MAX_AGE_MS: 5000.0,
-        CONF_RESULT_TIMEOUT_MARGIN_S: 10.0,
-        CONF_MAX_PENDING_PER_ROBOT: 16.0,
-        CONF_HEARTBEAT_UNAVAILABLE_AFTER_S: 30.0,
-        CONF_MIRROR_ENTITIES: [],
+        key: float(value) if isinstance(value, (int, float)) else list(value)
+        for key, value in DEFAULT_OPTIONS.items()
+        if not isinstance(value, str)
     }
+    data[CONF_TOPIC_PREFIX] = DEFAULT_TOPIC_PREFIX
+    data[CONF_SHARED_SECRET] = ""
     data.update(overrides)
-    return data
+    return nest_options(data)
 
 
 # --------------------------------------------------------------------------- user step
@@ -370,6 +390,15 @@ def test_parse_discovery_returns_prefix_and_announce() -> None:
 # --------------------------------------------------------------------------- options flow
 
 
+def _suggested(schema: probatio.Schema) -> dict[str, Any]:
+    """The suggested values a shown form carries, keyed by field name."""
+    return {
+        key.schema: key.description["suggested_value"]
+        for key in schema.schema
+        if isinstance(key, probatio.Marker) and key.description
+    }
+
+
 async def test_options_flow_saves_and_schedules_a_reload(
     hass: HomeAssistant, mqtt_setup: Any, make_config_entry: Any
 ) -> None:
@@ -379,6 +408,19 @@ async def test_options_flow_saves_and_schedules_a_reload(
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
     assert result["errors"] == {}
+    # The form shows the stored (flat) options, the advanced ones nested under the section.
+    schema = result["data_schema"]
+    assert schema is not None
+    assert _suggested(schema)[CONF_TOPIC_PREFIX] == DEFAULT_TOPIC_PREFIX
+    advanced = next(
+        value
+        for key, value in schema.schema.items()
+        if isinstance(key, probatio.Marker) and key.schema == SECTION_ADVANCED
+    )
+    assert isinstance(advanced, section)
+    assert advanced.options == {"collapsed": True}
+    assert _suggested(advanced.schema) == {key: DEFAULT_OPTIONS[key] for key in ADVANCED_OPTIONS}
+
     result = await hass.config_entries.options.async_configure(
         result["flow_id"], options_input(topic_prefix="ha/x")
     )
@@ -393,23 +435,53 @@ async def test_options_flow_saves_and_schedules_a_reload(
                 ack_timeout_s=3.5,
                 command_max_age_ms=8000.0,
                 mirror_entities=["binary_sensor.kitchen_motion"],
+                mirror_extra_attributes=["pm2_5", " moisture "],
+                result_expiry_s=3600.0,
+                duplicate_quiet_s=900.0,
+                session_change_grace_s=2.5,
             ),
         )
         await hass.async_block_till_done()
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert entry.options == {
+        **DEFAULT_OPTIONS,
         CONF_TOPIC_PREFIX: "lab",
         CONF_SHARED_SECRET: PLACEHOLDER_SECRET,
-        CONF_HEARTBEAT_INTERVAL_S: 2.0,
         CONF_ACK_TIMEOUT_S: 3.5,
         CONF_COMMAND_MAX_AGE_MS: 8000,
-        CONF_RESULT_TIMEOUT_MARGIN_S: 10,
-        CONF_MAX_PENDING_PER_ROBOT: 16,
-        CONF_HEARTBEAT_UNAVAILABLE_AFTER_S: 30,
         CONF_MIRROR_ENTITIES: ["binary_sensor.kitchen_motion"],
+        CONF_MIRROR_EXTRA_ATTRIBUTES: ["pm2_5", "moisture"],
+        CONF_RESULT_EXPIRY_S: 3600,
+        CONF_DUPLICATE_QUIET_S: 900,
+        CONF_SESSION_CHANGE_GRACE_S: 2.5,
     }
-    assert isinstance(entry.options[CONF_COMMAND_MAX_AGE_MS], int)
+    assert SECTION_ADVANCED not in entry.options, "the stored document is flat"
+    for key in (CONF_COMMAND_MAX_AGE_MS, CONF_RESULT_EXPIRY_S, CONF_DUPLICATE_QUIET_S):
+        assert isinstance(entry.options[key], int)
     schedule_reload.assert_called_once_with(entry.entry_id)
+
+
+async def test_options_flow_reshows_the_submitted_values_after_an_error(
+    hass: HomeAssistant, mqtt_setup: Any, make_config_entry: Any
+) -> None:
+    """A rejected prefix keeps what was typed, in the section too, instead of the stored values."""
+    entry = make_config_entry()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], options_input(topic_prefix="/bad", ack_expiry_s=240.0)
+    )
+    assert result["errors"] == {CONF_TOPIC_PREFIX: ERROR_INVALID_PREFIX}
+    schema = result["data_schema"]
+    assert schema is not None
+    assert _suggested(schema)[CONF_TOPIC_PREFIX] == "/bad"
+    advanced = next(
+        value
+        for key, value in schema.schema.items()
+        if isinstance(key, probatio.Marker) and key.schema == SECTION_ADVANCED
+    )
+    assert isinstance(advanced, section)
+    assert _suggested(advanced.schema)[CONF_ACK_EXPIRY_S] == 240.0
 
 
 async def test_options_flow_enforces_the_number_ranges(
@@ -418,32 +490,99 @@ async def test_options_flow_enforces_the_number_ranges(
     entry = make_config_entry()
     entry.mock_state(hass, ConfigEntryState.LOADED)
     result = await hass.config_entries.options.async_init(entry.entry_id)
-    with pytest.raises(InvalidData):
-        await hass.config_entries.options.async_configure(
-            result["flow_id"], options_input(ack_timeout_s=0.0)
+    for bad in (
+        {CONF_ACK_TIMEOUT_S: 0.0},
+        {CONF_HEARTBEAT_UNAVAILABLE_AFTER_S: 601.0},
+        {CONF_COMMAND_MAX_AGE_MS: 600100.0},
+        {CONF_INTENT_ACK_WAIT_S: 0.4},
+        {CONF_JOINT_MOVING_THRESHOLD: -0.5},
+        {CONF_JOINT_MOVING_HOLD_S: 30.5},
+        {CONF_ACK_EXPIRY_S: 5.0},
+        {CONF_RESULT_EXPIRY_S: 86401.0},
+        {CONF_REPLAY_SETTLE_S: 0.0},
+        {CONF_SESSION_CHANGE_GRACE_S: 10.5},
+        {CONF_FEEDBACK_THROTTLE_MS: 5050.0},
+        {CONF_HEARTBEAT_STALE_INTERVALS: 1.0},
+        {CONF_CLOCK_SKEW_WARN_MS: 50.0},
+        {CONF_DUPLICATE_SESSION_CHANGES: 0.0},
+        {CONF_DUPLICATE_SESSION_WINDOW_S: 30.0},
+        {CONF_DUPLICATE_QUIET_S: 3630.0},
+    ):
+        with pytest.raises(InvalidData):
+            await hass.config_entries.options.async_configure(
+                result["flow_id"], options_input(**bad)
+            )
+    # The widened maximum age is accepted, as is every other bound.
+    with patch.object(hass.config_entries, "async_schedule_reload"):
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            options_input(
+                command_max_age_ms=600000.0,
+                feedback_throttle_ms=0.0,
+                session_change_grace_s=0.0,
+                heartbeat_stale_intervals=20.0,
+                joint_moving_threshold=0.0,
+            ),
         )
-    with pytest.raises(InvalidData):
-        await hass.config_entries.options.async_configure(
-            result["flow_id"], options_input(heartbeat_unavailable_after_s=601.0)
-        )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert entry.options[CONF_COMMAND_MAX_AGE_MS] == 600000
+    assert entry.options[CONF_FEEDBACK_THROTTLE_MS] == 0
+    assert entry.options[CONF_SESSION_CHANGE_GRACE_S] == 0.0
 
 
 def test_normalise_options_casts_types() -> None:
     options = normalise_options(
-        options_input(topic_prefix="lab ", shared_secret=None, mirror_entities=("sensor.a",))
+        options_input(
+            topic_prefix="lab ",
+            shared_secret=None,
+            mirror_entities=("sensor.a",),
+            mirror_extra_attributes=[" pm2_5 ", "", "pm2_5", "moisture"],
+        )
     )
+    assert set(options) == set(DEFAULT_OPTIONS)
     assert options[CONF_TOPIC_PREFIX] == "lab"
     assert options[CONF_SHARED_SECRET] == ""
     assert options[CONF_MIRROR_ENTITIES] == ["sensor.a"]
+    assert options[CONF_MIRROR_EXTRA_ATTRIBUTES] == ["pm2_5", "moisture"]
     for key in (
         CONF_COMMAND_MAX_AGE_MS,
         CONF_RESULT_TIMEOUT_MARGIN_S,
         CONF_MAX_PENDING_PER_ROBOT,
         CONF_HEARTBEAT_UNAVAILABLE_AFTER_S,
+        CONF_ACK_EXPIRY_S,
+        CONF_RESULT_EXPIRY_S,
+        CONF_REPLAY_SETTLE_S,
+        CONF_FEEDBACK_THROTTLE_MS,
+        CONF_HEARTBEAT_STALE_INTERVALS,
+        CONF_CLOCK_SKEW_WARN_MS,
+        CONF_DUPLICATE_SESSION_CHANGES,
+        CONF_DUPLICATE_SESSION_WINDOW_S,
+        CONF_DUPLICATE_QUIET_S,
     ):
-        assert type(options[key]) is int
-    assert type(options[CONF_ACK_TIMEOUT_S]) is float
-    assert type(options[CONF_HEARTBEAT_INTERVAL_S]) is float
+        assert type(options[key]) is int, key
+    for key in (
+        CONF_ACK_TIMEOUT_S,
+        CONF_HEARTBEAT_INTERVAL_S,
+        CONF_INTENT_ACK_WAIT_S,
+        CONF_JOINT_MOVING_THRESHOLD,
+        CONF_JOINT_MOVING_HOLD_S,
+        CONF_SESSION_CHANGE_GRACE_S,
+    ):
+        assert type(options[key]) is float, key
+    # A flat submission (no section) normalises the same way, and a single text is a list.
+    flat = flatten_options(options_input(mirror_extra_attributes="pm2_5"))
+    assert SECTION_ADVANCED not in flat
+    assert normalise_options(flat)[CONF_MIRROR_EXTRA_ATTRIBUTES] == ["pm2_5"]
+    assert flatten_options(nest_options(DEFAULT_OPTIONS)) == DEFAULT_OPTIONS
+
+
+def test_every_default_is_what_the_hub_reads_and_the_section_lists_each_key_once() -> None:
+    assert HubOptions.from_mapping({}) == HubOptions.from_mapping(DEFAULT_OPTIONS)
+    assert set(ADVANCED_OPTIONS) < set(DEFAULT_OPTIONS)
+    assert len(set(ADVANCED_OPTIONS)) == len(ADVANCED_OPTIONS)
+    assert set(HubOptions.from_mapping({}).to_dict()) == (
+        set(DEFAULT_OPTIONS) - {CONF_SHARED_SECRET}
+    ) | {"secret_configured"}
 
 
 async def test_options_reload_keeps_the_registry(
@@ -468,7 +607,7 @@ async def test_options_reload_keeps_the_registry(
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(
-        result["flow_id"], options_input(ack_timeout_s=3.0)
+        result["flow_id"], options_input(ack_timeout_s=3.0, result_expiry_s=900.0)
     )
     assert result["type"] is FlowResultType.CREATE_ENTRY
     await hass.async_block_till_done()
@@ -476,6 +615,8 @@ async def test_options_reload_keeps_the_registry(
     new_hub: BridgeHub = entry.runtime_data
     assert new_hub is not hub
     assert new_hub.options.ack_timeout_s == 3.0
+    assert new_hub.options.result_expiry_s == 900.0
+    assert new_hub.registry.settings.result_expiry_s == 900.0, "the parked registry is retuned"
     survivor = new_hub.registry.get(command.task_id)
     assert survivor is not None
     assert survivor.is_outstanding
@@ -507,8 +648,14 @@ def test_translations_mirror_strings_and_cover_the_flow_keys() -> None:
         CONF_SHARED_SECRET,
     }
     assert set(strings["config"]["step"]["confirm"]["data"]) == {CONF_SHARED_SECRET}
-    assert set(strings["options"]["step"]["init"]["data"]) == set(DEFAULT_OPTIONS)
-    assert set(strings["options"]["step"]["init"]["data_description"]) == set(DEFAULT_OPTIONS)
+    main_keys = set(DEFAULT_OPTIONS) - set(ADVANCED_OPTIONS)
+    init = strings["options"]["step"]["init"]
+    assert set(init["data"]) == main_keys
+    assert set(init["data_description"]) == main_keys
+    advanced = init["sections"][SECTION_ADVANCED]
+    assert set(advanced["data"]) == set(ADVANCED_OPTIONS)
+    assert set(advanced["data_description"]) == set(ADVANCED_OPTIONS)
+    assert "{quiet_minutes}" in strings["issues"]["duplicate_robot_id"]["description"]
     assert set(strings["exceptions"]) == set(EXCEPTION_KEYS)
     assert set(strings["issues"]) == set(ISSUE_KINDS)
     assert set(strings["selector"]["wait"]["options"]) == {"ack", "result", "none"}

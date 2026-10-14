@@ -79,7 +79,7 @@ Publishing a command with a message expiry interval was refused because Home Ass
 
 ### Two robot nodes may be using the id {robot_id}
 
-Opened on either of two pieces of evidence: two different `instance` values (`hostname:pid`) seen for one robot within a heartbeat interval, or more than three `session` changes within five minutes. Two nodes with one `robot.id` share one MQTT client id, so they take each other's broker session over in turn, and their state, acknowledgements and results interleave; the node logs `Session taken over` and exits after `mqtt.takeover_exit_after` takeovers so the launch file's respawn limit can stop the flapping.
+Opened on either of two pieces of evidence: two different `instance` values (`hostname:pid`) seen for one robot within a heartbeat interval, or more than `duplicate_session_changes` (3) `session` changes within `duplicate_session_window_s` (300 s); the repair closes after `duplicate_quiet_s` (600 s) without new evidence (`docs/install-ha.md`, Advanced). Two nodes with one `robot.id` share one MQTT client id, so they take each other's broker session over in turn, and their state, acknowledgements and results interleave; the node logs `Session taken over` and exits after `mqtt.takeover_exit_after` takeovers so the launch file's respawn limit can stop the flapping.
 
 A node that crashes and restarts repeatedly trips the same check, because every restart is a new session, so this repair can also mean one node in a crash loop: look at the node's log before looking for a second machine. Give each robot its own `robot.id`, or fix the crash, then restart. The problem sensor shows `duplicate_robot_id` while the repair is open. Closes after ten quiet minutes.
 

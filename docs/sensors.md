@@ -1,6 +1,6 @@
 # Sensors: getting Home Assistant's sensors into ROS 2
 
-Interview decision Q4 asked for two ways of getting sensor events to the robots, because most of the kitchen's sensors are on Zigbee2MQTT and already on the broker, while some may arrive by other protocols. This page describes both paths, the one payload shape the robots can rely on, and how a ROS 2 node reads them. The reverse direction, a robot's joint positions into Home Assistant (added 2026-10-14 towards 0.2.0), is the last section.
+Interview decision Q4 asked for two ways of getting sensor events to the robots, because many of a home's sensors are on Zigbee2MQTT and already on the broker, while others arrive by other protocols. This page describes both paths, the one payload shape the robots can rely on, and how a ROS 2 node reads them. The reverse direction, a robot's joint positions into Home Assistant (added 2026-10-14 towards 0.2.0), is the last section.
 
 | | Fast path | Normalised path |
 |---|---|---|
@@ -56,7 +56,7 @@ Nothing on this path reformats the device's own payload: a Zigbee2MQTT motion se
 
 ## Path 2: the normalised path (any entity, one schema)
 
-The integration republishes every entity named in its "Mirrored entities" option (`mirror_entities`) to `{prefix}/ha/sensors/{domain}/{object_id}`, retained at QoS 0 with no expiry: once when the entry starts, and again on every state change of the entity. Retained, so a node started later sees the current value at once.
+The integration republishes every entity named in its "Mirrored entities" option (`mirror_entities`) to `{prefix}/ha/sensors/{domain}/{object_id}`, retained at QoS 0 with no expiry: once when the entry starts, and again on every state or attribute change of the entity (a light's brightness ramp republishes each step, not only the final value). Retained, so a node started later sees the current value at once.
 
 How it behaves:
 
@@ -110,6 +110,8 @@ The attribute allowlist (`SENSOR_ATTRIBUTE_ALLOWLIST` in `sensors_out.py`); anyt
 | Selects and numbers | `options`, `min`, `max`, `step`, `mode` |
 
 Attribute values that are not plain JSON types are converted: mappings and lists recursively, anything else to its string form.
+
+The list above is the privacy baseline and is fixed in code. A site whose sensors carry attributes outside it (`pm2_5`, `moisture`, `distance`, a lock's `lock_state`, a template entity's own fields) adds their names to the integration's **Extra mirrored attributes** option (`mirror_extra_attributes`, one attribute name per entry, empty by default; `docs/install-ha.md`, section 3). The names are appended to the allowlist when the mirror starts, so a change takes effect on the reload that follows saving the options. Add nothing that locates or identifies a person or carries a credential: `latitude`, `longitude`, `gps_accuracy`, `id`, `access_token`, `entity_picture` and the like leave Home Assistant for every client on the broker the moment they are listed.
 
 ## Reading them on the ROS 2 side
 
@@ -175,7 +177,7 @@ The executor plugin can subscribe in the same way; the mirror is just another RO
 
 ## Derived and timed triggers stay in Home Assistant
 
-The interview's own first scenario (Q1): no motion in the kitchen for five minutes turns the lights off and sends every available robot back to its home pose. The "for five minutes" is a Home Assistant judgement, so this is an automation on the command path, not a mirrored sensor. From `docs/examples/automations.yaml`:
+The project's first scenario (interview Q1): no motion in a kitchen for five minutes turns the lights off and sends every available robot back to its home pose. The "for five minutes" is a Home Assistant judgement, so this is an automation on the command path, not a mirrored sensor. From `docs/examples/automations.yaml`:
 
 ```yaml
 - alias: "Kitchen idle: lights off and arms home"
@@ -217,7 +219,7 @@ The reverse direction, added 2026-10-14 towards 0.2.0 (`docs/decisions.md`, revi
 |---|---|
 | Topic | `{prefix}/{robot_id}/joints`, QoS 0, never retained, MQTT 5 message expiry 5 s. Only from a node whose announce carries `joints`. |
 | Rate | At most `telemetry.joints_rate_hz` messages per second (default 2; 0 disables the path and the announce omits `joints`), only when a position moved by more than `telemetry.joints_min_delta` since the last publication (default 0.5 for degrees, 0.01 for radians), plus once on every (re)connect and announce. |
-| Entities | One sensor per announced joint: unique id `{robot_id}_joint_{index}` (index from 0), name "Joint {index + 1} {joint name}", unit `°` or `rad` as announced, one decimal in the display, no state class (so nothing enters long-term statistics). Attributes `index`, `joint_name`, `limit_min` and `limit_max` (null when the robot announces no limits). |
+| Entities | One sensor per announced joint: unique id `{robot_id}_joint_{index}` (index from 0), name "Joint {index + 1} {joint name}", unit `°` or `rad` as announced, no state class (so nothing enters long-term statistics). The display precision defaults to one decimal for degrees and three for radians and is changeable per entity under its settings (the more-info dialog's cog, Display precision), which is the override for a gauge that should read finer or coarser. Attributes `index`, `joint_name`, `limit_min` and `limit_max` (null when the robot announces no limits), `velocity` (the joint's latest reported velocity in the announced unit per second; the fake executor reports one per joint and the MoveIt adapter forwards what `joint_states` carries; `null` when the robot reports none) and `moving` (the hub's verdict under the "Joint moving threshold" option, `docs/install-ha.md` section 3: when the payload carries velocities, `true` while the reported velocity exceeds the threshold, so a reported 0 is at rest even if the position still changed; for a robot that reports none, `true` when the position changed by more than the threshold since the previous payload. The verdict stands for the "Joint moving hold" option after the payload, by default two publication intervals of the announced rate and at least 1 s, then the joint counts as still until the next payload). |
 | Availability | Unavailable with the robot, by the same rule as every other entity of the device. A stalled stream alone changes nothing: the sensor keeps its last value. |
 | Lifetime | Created on an announce with `joints`; removed when a later announce drops the joint or the whole key. |
 | Ordering | A payload whose `seq` regresses within a session is dropped, as is one whose number of positions differs from the announced names. |

@@ -43,8 +43,13 @@ from typing import Any, Literal
 from ros2_ha_bridge.authoriser import (
     DEFAULT_RETAINED_REJECTIONS_PER_MINUTE,
     DEFAULT_TASK_TIMEOUT_CAP_S,
+    DEFAULT_WARN_INTERVAL_S,
 )
-from ros2_ha_bridge.dedupe_store import DEFAULT_DEDUPE_SIZE, DEFAULT_DEDUPE_WINDOW_S
+from ros2_ha_bridge.dedupe_store import (
+    DEFAULT_DEDUPE_SIZE,
+    DEFAULT_DEDUPE_WINDOW_S,
+    DEFAULT_MIN_WRITE_INTERVAL_S,
+)
 from ros2_ha_bridge.executors.base import JointUnit
 from ros2_ha_bridge.executors.fake import (
     DEFAULT_FEEDBACK_HZ,
@@ -68,11 +73,13 @@ from ros2_ha_bridge.protocol import (
 )
 from ros2_ha_bridge.sensor_mirror import (
     DEFAULT_AVAILABILITY_SUFFIX,
+    DEFAULT_ROS_QUEUE_DEPTH,
     DEFAULT_ROS_TOPIC,
     SensorMirror,
     filter_error,
 )
 from ros2_ha_bridge.task_manager import TaskManagerSettings
+from ros2_ha_bridge.watchdog import DEFAULT_HA_LINK_TOPIC
 
 __all__ = [
     'DEFAULT_DATA_DIR',
@@ -122,13 +129,16 @@ DEFAULT_DATA_DIR = '~/.ros/ros2_ha_bridge'
 
 # The ``mqtt.*`` defaults below equal the DEFAULT_* constants of ``mqtt_link``. They are
 # restated here because that module imports paho and this one must stay importable on a
-# machine without it; ``test_bridge_node.py`` checks that the two agree.
+# machine without it; ``test_bridge_node.py`` and ``test_mqtt_link.py`` check that they agree.
 _DEFAULT_MQTT_PORT = 1883
 _DEFAULT_KEEPALIVE_S = 15
 _DEFAULT_RECONNECT_MIN_S = 1
 _DEFAULT_RECONNECT_MAX_S = 30
 _DEFAULT_TAKEOVER_EXIT_AFTER = 3
+_DEFAULT_TAKEOVER_SUSPECT_S = 10.0
+_DEFAULT_TAKEOVER_WINDOW_S = 600.0
 _DEFAULT_INBOUND_QUEUE_MAX = 256
+_DEFAULT_OFFLINE_WAIT_S = 2.0
 
 _MANAGER_DEFAULTS = TaskManagerSettings()
 
@@ -219,7 +229,20 @@ PARAMETERS: tuple[ParameterSpec, ...] = (
         'mqtt.takeover_exit_after',
         'integer',
         _DEFAULT_TAKEOVER_EXIT_AFTER,
-        'Exit non-zero after this many session takeovers within ten minutes; 0 never.',
+        'Exit non-zero after this many session takeovers within mqtt.takeover_window_s; 0 never.',
+    ),
+    _spec(
+        'mqtt.takeover_suspect_s',
+        'double',
+        _DEFAULT_TAKEOVER_SUSPECT_S,
+        'A broker-sent disconnect within this many seconds of connecting counts as a takeover '
+        'whatever its reason code; 0 leaves reason code 142 as the only signal.',
+    ),
+    _spec(
+        'mqtt.takeover_window_s',
+        'double',
+        _DEFAULT_TAKEOVER_WINDOW_S,
+        'Sliding window, in seconds, the takeover count is measured over.',
     ),
     _spec(
         'mqtt.max_payload_bytes',
@@ -232,6 +255,13 @@ PARAMETERS: tuple[ParameterSpec, ...] = (
         'integer',
         _DEFAULT_INBOUND_QUEUE_MAX,
         'Bound of the inbound queue between the network thread and the node.',
+    ),
+    _spec(
+        'mqtt.offline_wait_s',
+        'double',
+        _DEFAULT_OFFLINE_WAIT_S,
+        'Seconds a clean stop waits for the retained availability offline to be acknowledged; '
+        '0 relies on the will.',
     ),
     _spec(
         'topic_prefix',
@@ -250,6 +280,13 @@ PARAMETERS: tuple[ParameterSpec, ...] = (
         'double',
         2.0,
         'Re-announce after HA birth within a random delay up to this many seconds.',
+    ),
+    _spec(
+        'logging.warn_interval_s',
+        'double',
+        DEFAULT_WARN_INTERVAL_S,
+        'Least spacing of the rate-limited WARN lines (oversize, queue full, retained, invalid '
+        'id, unauthorised); 0 warns on every event.',
     ),
     _spec(
         'executor',
@@ -310,6 +347,12 @@ PARAMETERS: tuple[ParameterSpec, ...] = (
         'integer',
         DEFAULT_DEDUPE_SIZE,
         'How many command ids are remembered at most.',
+    ),
+    _spec(
+        'command.dedupe_write_interval_s',
+        'double',
+        DEFAULT_MIN_WRITE_INTERVAL_S,
+        'Least spacing between two rewrites of dedupe.json; 0 writes at every accepted ack.',
     ),
     _spec(
         'command.task_timeout_cap_s',
@@ -379,6 +422,12 @@ PARAMETERS: tuple[ParameterSpec, ...] = (
         'HA heartbeat silence that counts as link down; floor of 2.5 x the HA interval.',
     ),
     _spec(
+        'watchdog.ros_topic',
+        'string',
+        DEFAULT_HA_LINK_TOPIC,
+        'Latched std_msgs/Bool ROS topic that mirrors the HA link (up is true).',
+    ),
+    _spec(
         'mirror.topics',
         'string_array',
         (),
@@ -395,6 +444,12 @@ PARAMETERS: tuple[ParameterSpec, ...] = (
         'string',
         DEFAULT_ROS_TOPIC,
         'ROS topic (std_msgs/String envelopes) the mirrored messages are published on.',
+    ),
+    _spec(
+        'mirror.ros_queue_depth',
+        'integer',
+        DEFAULT_ROS_QUEUE_DEPTH,
+        'Keep-last history depth of the ROS publisher on mirror.ros_topic.',
     ),
     _spec(
         'fake.task_duration_s',
@@ -474,8 +529,11 @@ class MqttSettings:
     reconnect_max_s: int = _DEFAULT_RECONNECT_MAX_S
     connect_timeout_s: float = 0.0
     takeover_exit_after: int = _DEFAULT_TAKEOVER_EXIT_AFTER
+    takeover_suspect_s: float = _DEFAULT_TAKEOVER_SUSPECT_S
+    takeover_window_s: float = _DEFAULT_TAKEOVER_WINDOW_S
     max_payload_bytes: int = MAX_PAYLOAD_BYTES
     inbound_queue_max: int = _DEFAULT_INBOUND_QUEUE_MAX
+    offline_wait_s: float = _DEFAULT_OFFLINE_WAIT_S
 
 
 @dataclass(frozen=True)
@@ -502,6 +560,8 @@ class CommandSettings:
     clock_skew_tolerance_ms: int = DEFAULT_CLOCK_SKEW_TOLERANCE_MS
     dedupe_window_s: float = DEFAULT_DEDUPE_WINDOW_S
     dedupe_size: int = DEFAULT_DEDUPE_SIZE
+    #: ``command.dedupe_write_interval_s``: least spacing between rewrites of ``dedupe.json``.
+    dedupe_write_interval_s: float = DEFAULT_MIN_WRITE_INTERVAL_S
     task_timeout_cap_s: float = DEFAULT_TASK_TIMEOUT_CAP_S
 
     @property
@@ -557,6 +617,8 @@ class WatchdogSettings:
 
     mode: WatchdogMode = 'none'
     timeout_s: float = 5.0
+    #: ``watchdog.ros_topic``: the latched ``std_msgs/Bool`` that mirrors the HA link.
+    ros_topic: str = DEFAULT_HA_LINK_TOPIC
 
 
 @dataclass(frozen=True)
@@ -566,6 +628,8 @@ class MirrorSettings:
     topics: tuple[str, ...] = ()
     availability_suffix: str = DEFAULT_AVAILABILITY_SUFFIX
     ros_topic: str = DEFAULT_ROS_TOPIC
+    #: ``mirror.ros_queue_depth``: keep-last history depth of the publisher on ``ros_topic``.
+    ros_queue_depth: int = DEFAULT_ROS_QUEUE_DEPTH
 
 
 @dataclass(frozen=True)
@@ -585,6 +649,9 @@ class BridgeSettings:
     topic_prefix: str = DEFAULT_PREFIX
     ha_status_topic: str = DEFAULT_HA_STATUS_TOPIC
     announce_jitter_s: float = 2.0
+    #: ``logging.warn_interval_s``: spacing of the rate-limited WARN lines of the link and the
+    #: authoriser; 0 warns on every event.
+    logging_warn_interval_s: float = DEFAULT_WARN_INTERVAL_S
     executor: ExecutorSettings = ExecutorSettings()
     command: CommandSettings = CommandSettings()
     #: ``data_dir`` expanded, or ``None`` when the parameter was empty (memory-only store).
@@ -629,11 +696,15 @@ class BridgeSettings:
             'mqtt.reconnect_max_s': mqtt.reconnect_max_s,
             'mqtt.connect_timeout_s': mqtt.connect_timeout_s,
             'mqtt.takeover_exit_after': mqtt.takeover_exit_after,
+            'mqtt.takeover_suspect_s': mqtt.takeover_suspect_s,
+            'mqtt.takeover_window_s': mqtt.takeover_window_s,
             'mqtt.max_payload_bytes': mqtt.max_payload_bytes,
             'mqtt.inbound_queue_max': mqtt.inbound_queue_max,
+            'mqtt.offline_wait_s': mqtt.offline_wait_s,
             'topic_prefix': self.topic_prefix,
             'ha_status_topic': self.ha_status_topic,
             'announce.jitter_s': self.announce_jitter_s,
+            'logging.warn_interval_s': self.logging_warn_interval_s,
             'executor': executor.spec,
             'executor.call_warn_s': executor.call_warn_s,
             'executor.cancel_grace_s': executor.cancel_grace_s,
@@ -644,6 +715,7 @@ class BridgeSettings:
             'command.clock_skew_tolerance_ms': command.clock_skew_tolerance_ms,
             'command.dedupe_window_s': command.dedupe_window_s,
             'command.dedupe_size': command.dedupe_size,
+            'command.dedupe_write_interval_s': command.dedupe_write_interval_s,
             'command.task_timeout_cap_s': command.task_timeout_cap_s,
             'data_dir': '' if self.data_dir is None else str(self.data_dir),
             'reply.ack_expiry_s': reply.ack_expiry_s,
@@ -655,9 +727,11 @@ class BridgeSettings:
             'telemetry.joints_min_delta': self.telemetry.joints_min_delta,
             'watchdog.mode': self.watchdog.mode,
             'watchdog.timeout_s': self.watchdog.timeout_s,
+            'watchdog.ros_topic': self.watchdog.ros_topic,
             'mirror.topics': list(self.mirror.topics),
             'mirror.availability_suffix': self.mirror.availability_suffix,
             'mirror.ros_topic': self.mirror.ros_topic,
+            'mirror.ros_queue_depth': self.mirror.ros_queue_depth,
             'fake.task_duration_s': self.fake.task_duration_s,
             'fake.feedback_hz': self.fake.feedback_hz,
         }
@@ -787,9 +861,15 @@ def settings_from_mapping(
     if mode not in WATCHDOG_MODES:
         modes = ', '.join(WATCHDOG_MODES)
         raise ConfigError(f'watchdog.mode must be one of {modes}, not {mode!r}')
+    ha_link_topic = read.string('watchdog.ros_topic').strip()
+    if not ha_link_topic:
+        raise ConfigError(
+            f'watchdog.ros_topic must name a ROS topic (the default is {DEFAULT_HA_LINK_TOPIC})'
+        )
     watchdog = WatchdogSettings(
         mode=_watchdog_mode(mode),
         timeout_s=read.number('watchdog.timeout_s', exclusive_minimum=0),
+        ros_topic=ha_link_topic,
     )
 
     return BridgeSettings(
@@ -798,6 +878,7 @@ def settings_from_mapping(
         topic_prefix=prefix,
         ha_status_topic=status_topic,
         announce_jitter_s=read.number('announce.jitter_s', minimum=0),
+        logging_warn_interval_s=read.number('logging.warn_interval_s', minimum=0),
         executor=_executor_settings(read),
         command=command,
         data_dir=data_dir,
@@ -889,8 +970,11 @@ def _mqtt_settings(
         reconnect_max_s=reconnect_max_s,
         connect_timeout_s=read.number('mqtt.connect_timeout_s', minimum=0),
         takeover_exit_after=read.integer('mqtt.takeover_exit_after', minimum=0),
+        takeover_suspect_s=read.number('mqtt.takeover_suspect_s', minimum=0),
+        takeover_window_s=read.number('mqtt.takeover_window_s', exclusive_minimum=0),
         max_payload_bytes=read.integer('mqtt.max_payload_bytes', minimum=1),
         inbound_queue_max=read.integer('mqtt.inbound_queue_max', minimum=1),
+        offline_wait_s=read.number('mqtt.offline_wait_s', minimum=0),
     )
 
 
@@ -938,6 +1022,7 @@ def _command_settings(
         clock_skew_tolerance_ms=read.integer('command.clock_skew_tolerance_ms', minimum=0),
         dedupe_window_s=window_s,
         dedupe_size=read.integer('command.dedupe_size', minimum=1),
+        dedupe_write_interval_s=read.number('command.dedupe_write_interval_s', minimum=0),
         task_timeout_cap_s=read.number('command.task_timeout_cap_s', exclusive_minimum=0),
     )
 
@@ -954,7 +1039,12 @@ def _mirror_settings(read: _Reader) -> MirrorSettings:
         SensorMirror(topics, _discard, availability_suffix=suffix)
     except (TypeError, ValueError) as error:
         raise ConfigError(f'mirror: {error}') from error
-    return MirrorSettings(topics=topics, availability_suffix=suffix, ros_topic=ros_topic)
+    return MirrorSettings(
+        topics=topics,
+        availability_suffix=suffix,
+        ros_topic=ros_topic,
+        ros_queue_depth=read.integer('mirror.ros_queue_depth', minimum=1),
+    )
 
 
 # --------------------------------------------------------------------------- presentation

@@ -175,6 +175,8 @@ def test_config_repr_never_shows_the_password(rig: Rig) -> None:
         {'reconnect_min_s': 0},
         {'reconnect_max_s': 0},
         {'takeover_exit_after': -1},
+        {'takeover_suspect_s': -1.0},
+        {'takeover_window_s': 0.0},
         {'max_payload_bytes': 0},
         {'inbound_queue_max': 0},
         {'warn_interval_s': -1.0},
@@ -185,6 +187,28 @@ def test_config_rejects_bad_values(overrides: dict[str, Any]) -> None:
     values.update(overrides)
     with pytest.raises(ValueError):
         ml.MqttLinkConfig(**values)
+
+
+def test_config_defaults_match_the_parameter_table() -> None:
+    """``parameters.py`` restates these so it imports without paho; they must agree."""
+    from ros2_ha_bridge import parameters
+
+    defaults = parameters.default_values()
+    config = ml.MqttLinkConfig(host=HOST, client_id=CLIENT_ID)
+    assert defaults['mqtt.port'] == config.port == ml.DEFAULT_PORT
+    assert defaults['mqtt.keepalive_s'] == config.keepalive_s == ml.DEFAULT_KEEPALIVE_S
+    assert defaults['mqtt.reconnect_min_s'] == config.reconnect_min_s
+    assert defaults['mqtt.reconnect_max_s'] == config.reconnect_max_s
+    assert defaults['mqtt.takeover_exit_after'] == config.takeover_exit_after
+    assert (
+        defaults['mqtt.takeover_suspect_s'] == config.takeover_suspect_s == ml.TAKEOVER_SUSPECT_S
+    )
+    assert defaults['mqtt.takeover_window_s'] == config.takeover_window_s == ml.TAKEOVER_WINDOW_S
+    assert defaults['mqtt.inbound_queue_max'] == config.inbound_queue_max
+    assert defaults['mqtt.offline_wait_s'] == ml.DEFAULT_OFFLINE_WAIT_S
+    assert (
+        defaults['logging.warn_interval_s'] == config.warn_interval_s == ml.DEFAULT_WARN_INTERVAL_S
+    )
 
 
 def test_subscription_spec_validates_filter_and_qos() -> None:
@@ -649,6 +673,59 @@ def test_broker_eviction_long_after_connect_is_an_ordinary_disconnect(
     events = [i for i in rig.link.drain() if isinstance(i, ml.DisconnectEvent)]
     assert len(events) == 1 and not events[0].taken_over
     assert records(errors, logging.ERROR) == []
+
+
+def test_takeover_suspect_window_is_a_parameter_and_zero_disables_it(
+    sync_broker: FakeBroker, clock: FakeClock, errors: pytest.LogCaptureFixture
+) -> None:
+    """``mqtt.takeover_suspect_s`` widens or switches off the eviction heuristic."""
+    wide = Rig(sync_broker, clock, takeover_suspect_s=30.0)
+    wide.start()
+    clock.advance(ml.TAKEOVER_SUSPECT_S + 5)
+    sync_broker.evict(CLIENT_ID)
+    assert wide.counters.takeovers == 1, 'inside the widened window'
+    message = records(errors, logging.ERROR)[-1].getMessage()
+    assert 'mqtt.takeover_suspect_s (30 s)' in message
+    wide.link.shutdown(offline_wait_s=0)
+
+    errors.clear()
+    off = Rig(sync_broker, clock, takeover_suspect_s=0.0)
+    off.start()
+    sync_broker.evict(CLIENT_ID)
+    assert off.counters.takeovers == 0 and not off.link.should_exit
+    events = [i for i in off.link.drain() if isinstance(i, ml.DisconnectEvent)]
+    assert len(events) == 1 and not events[0].taken_over and events[0].from_server
+    assert records(errors, logging.ERROR) == []
+    off.client.reconnect()
+    off.intruder().connect(HOST)
+    assert off.counters.takeovers == 1, 'reason code 142 still counts with the heuristic off'
+    assert 'reason code 142' in records(errors, logging.ERROR)[-1].getMessage()
+
+
+def test_takeover_window_is_a_parameter(
+    sync_broker: FakeBroker, clock: FakeClock, errors: pytest.LogCaptureFixture
+) -> None:
+    """``mqtt.takeover_window_s`` is the window the count, the exit and the backoff use."""
+    rig = Rig(sync_broker, clock, takeover_window_s=60.0, takeover_exit_after=2)
+    rig.start()
+    intruder = rig.intruder()
+    flap(rig, intruder, 1)
+    assert rig.link.takeovers_in_window == 1
+    assert 'within 1 minutes' in records(errors, logging.ERROR)[-1].getMessage()
+    clock.advance(61)
+    assert rig.link.takeovers_in_window == 0, 'forgotten after the shorter window'
+    rig.client.reconnect()
+    intruder.reconnect()
+    assert rig.counters.takeovers == 2 and not rig.link.should_exit
+    rig.client.reconnect()
+    intruder.reconnect()
+    assert rig.link.should_exit
+    assert rig.link.exit_reason is not None and 'within 1 minutes' in rig.link.exit_reason
+    intruder.disconnect()
+    clock.advance(61)
+    rig.client.reconnect()
+    assert rig.client.reconnect_delay == (1, 30), 'backoff restored after the shorter window'
+    assert any('for 1 minutes' in r.getMessage() for r in records(errors, logging.INFO))
 
 
 def flap(rig: Rig, intruder: FakeMqttClient, times: int) -> None:

@@ -223,6 +223,32 @@ def test_once_per_second_coalesces_writes_with_a_scheduler(
     assert store.flush() is False
 
 
+def test_zero_write_interval_writes_at_every_accepted_ack(
+    clock: FakeClock, scheduler: FakeScheduler, tmp_path: Path
+) -> None:
+    """``command.dedupe_write_interval_s`` 0: no coalescing, so no crash window."""
+    store = DedupeStore(
+        clock=clock, data_dir=tmp_path, scheduler=scheduler, min_write_interval_s=0
+    )
+    store.remember(ID_A, clock.now_ms(), _ack_bytes(ID_A), accepted=True)
+    store.remember(ID_B, clock.now_ms(), _ack_bytes(ID_B), accepted=True)
+    store.remember(ID_C, clock.now_ms(), _ack_bytes(ID_C), accepted=True)
+    assert (store.writes, store.pending_write) == (3, False)
+    assert scheduler.pending == []
+    assert store.path is not None
+    assert [e['id'] for e in _file_entries(store.path)] == [ID_A, ID_B, ID_C]
+    slow = DedupeStore(
+        clock=clock, data_dir=tmp_path / 'slow', scheduler=scheduler, min_write_interval_s=30
+    )
+    slow.remember(ID_A, clock.now_ms(), _ack_bytes(ID_A), accepted=True)
+    slow.remember(ID_B, clock.now_ms(), _ack_bytes(ID_B), accepted=True)
+    assert (slow.writes, slow.pending_write) == (1, True)
+    clock.advance(29)
+    assert slow.writes == 1
+    clock.advance(1)
+    assert (slow.writes, slow.pending_write) == (2, False)
+
+
 def test_once_per_second_without_a_scheduler_writes_at_the_next_chance(
     clock: FakeClock, tmp_path: Path
 ) -> None:

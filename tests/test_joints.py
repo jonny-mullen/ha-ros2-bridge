@@ -27,13 +27,15 @@ from syrupy.assertion import SnapshotAssertion
 
 from custom_components.ros2_bridge import sensor
 from custom_components.ros2_bridge.const import (
+    CONF_JOINT_MOVING_HOLD_S,
+    CONF_JOINT_MOVING_THRESHOLD,
     DOMAIN,
     SIGNAL_ROBOT_JOINTS_CHANGED,
     joints_filter,
 )
 from custom_components.ros2_bridge.diagnostics import async_get_device_diagnostics
 from custom_components.ros2_bridge.hub import BridgeHub
-from custom_components.ros2_bridge.sensor import JointSensor
+from custom_components.ros2_bridge.sensor import JOINT_UNRECORDED_ATTRIBUTES, JointSensor
 
 from .common import (
     OTHER_SESSION,
@@ -601,3 +603,172 @@ async def test_diagnostics_show_the_positions_and_seq(hass: HomeAssistant, hub: 
     assert data["robot"]["joints"]["seq"] == 7
     assert data["robot"]["joints"]["positions"] == POSITIONS
     assert data["robot"]["announce"]["joints"]["names"] == joints_block()["names"]
+
+
+# --------------------------------------------------------------------------- velocity and moving
+
+
+def _joint_attributes(hass: HomeAssistant, name: str, count: int = JOINT_COUNT) -> list[Any]:
+    values: list[Any] = []
+    for entity_id in _joint_entity_ids(hass)[:count]:
+        assert entity_id is not None
+        state = hass.states.get(entity_id)
+        assert state is not None
+        values.append(state.attributes[name])
+    return values
+
+
+async def test_velocity_and_moving_attributes(
+    hass: HomeAssistant, hub: BridgeHub, advance: Callable[[float], Awaitable[None]]
+) -> None:
+    assert _joint_attributes(hass, "velocity") == [None] * JOINT_COUNT
+    assert _joint_attributes(hass, "moving") == [None] * JOINT_COUNT, "unknown before a payload"
+
+    await _fire_joints(hass)
+    assert _joint_attributes(hass, "velocity") == [None] * JOINT_COUNT
+    assert _joint_attributes(hass, "moving") == [False] * JOINT_COUNT, "nothing to compare with"
+    robot = hub.robots[ROBOT_ID]
+    assert robot.joint_moving == (False,) * JOINT_COUNT
+    assert robot.joints_moving_until == hub.now + 1000, "two intervals at the announced 2 Hz"
+
+    # Without velocities the position delta decides.
+    moved = list(POSITIONS)
+    moved[0] += 1.0  # more than the 0.5 deg default
+    moved[1] += 0.3  # not enough
+    await _fire_joints(hass, positions=moved, seq=8)
+    assert _joint_attributes(hass, "velocity") == [None] * JOINT_COUNT
+    assert _joint_attributes(hass, "moving") == [True] + [False] * (JOINT_COUNT - 1)
+
+    # With velocities the robot's own statement decides, whatever the positions did.
+    moved[0] += 1.0  # moved again but reported at rest: a motion's arrival report
+    velocities = [0.0] * JOINT_COUNT
+    velocities[5] = -0.5  # exactly the threshold is not "more than"
+    velocities[6] = 0.7  # a reported velocity beyond the threshold while the position holds
+    await _fire_joints(hass, positions=moved, velocities=velocities, seq=9)
+    assert _joint_attributes(hass, "velocity") == velocities
+    expected = [False, False, False, False, False, False, True]
+    assert _joint_attributes(hass, "moving") == expected
+    assert hub.diagnostics()["robots"][ROBOT_ID]["joint_moving"] == expected
+
+    # The verdict stands for two publication intervals, then housekeeping clears it.
+    await advance(0.5)
+    assert _joint_attributes(hass, "moving") == expected
+    await advance(1)
+    assert _joint_attributes(hass, "moving") == [False] * JOINT_COUNT
+    assert _joint_attributes(hass, "velocity") == velocities, "the last payload is still shown"
+    assert robot.joints_moving_until is None
+    await advance(1)
+    assert _joint_attributes(hass, "moving") == [False] * JOINT_COUNT, "clearing is idempotent"
+
+    # A repeat of the same positions (a reconnect republish) is not movement.
+    await _fire_joints(hass, positions=moved, seq=10)
+    assert _joint_attributes(hass, "moving") == [False] * JOINT_COUNT
+    assert _joint_attributes(hass, "velocity") == [None] * JOINT_COUNT
+
+    entity_id = _joint_entity_ids(hass)[0]
+    assert entity_id is not None
+    state = hass.states.get(entity_id)
+    assert state is not None and state.state_info is not None
+    assert JOINT_UNRECORDED_ATTRIBUTES <= state.state_info["unrecorded_attributes"]
+    assert "limit_min" not in state.state_info["unrecorded_attributes"]
+
+
+async def test_joint_moving_threshold_option(
+    hass: HomeAssistant,
+    mqtt_setup: Any,
+    make_config_entry: Callable[..., MockConfigEntry],
+    complete_hub_start: Callable[[BridgeHub], Awaitable[None]],
+) -> None:
+    entry = make_config_entry(options={CONF_JOINT_MOVING_THRESHOLD: 2.0})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    await complete_hub_start(entry.runtime_data)
+    fire_robot_message(hass, "announce", announce_with_joints_payload())
+    fire_robot_message(hass, "availability", "online")
+    await hass.async_block_till_done()
+    await _fire_joints(hass)
+    moved = list(POSITIONS)
+    moved[0] += 1.0  # moving by the default, still by the option
+    moved[1] += 2.5
+    await _fire_joints(hass, positions=moved, seq=8)
+    assert _joint_attributes(hass, "moving") == [False, True, False, False, False, False, False]
+    velocities = [0.0, 0.0, 2.0, 2.1, 0.0, 0.0, 0.0]  # exactly the option is not "more than"
+    await _fire_joints(hass, positions=moved, velocities=velocities, seq=9)
+    assert _joint_attributes(hass, "moving") == [False, False, False, True, False, False, False]
+
+
+async def test_joint_moving_hold_option(
+    hass: HomeAssistant,
+    mqtt_setup: Any,
+    make_config_entry: Callable[..., MockConfigEntry],
+    complete_hub_start: Callable[[BridgeHub], Awaitable[None]],
+    advance: Callable[[float], Awaitable[None]],
+) -> None:
+    """A slow sweep without velocities: the node publishes on change only, so a lone
+    joint moving at less than ``min_delta * rate_hz / 2`` per second reports less
+    often than the default hold of two intervals. The option keeps the verdict
+    standing between such payloads instead of letting it flicker."""
+    entry = make_config_entry(options={CONF_JOINT_MOVING_HOLD_S: 3.0})
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    await complete_hub_start(entry.runtime_data)
+    fire_robot_message(hass, "announce", announce_with_joints_payload())
+    fire_robot_message(hass, "availability", "online")
+    await hass.async_block_till_done()
+    await _fire_joints(hass)
+    hub: BridgeHub = entry.runtime_data
+    robot = hub.robots[ROBOT_ID]
+    assert robot.joints_moving_until == hub.now + 3000, "the option, not two intervals"
+
+    positions = list(POSITIONS)
+    moving = [False, False, True, False, False, False, False]
+    for seq in (8, 9):
+        positions[2] += 0.6  # just over the 0.5 deg default, 2 s apart: 0.3 deg/s
+        await _fire_joints(hass, positions=positions, seq=seq)
+        assert _joint_attributes(hass, "moving") == moving
+        await advance(1)
+        assert _joint_attributes(hass, "moving") == moving, "held past the default 1 s"
+        await advance(1)
+        assert _joint_attributes(hass, "moving") == moving, "and up to the next payload"
+    await advance(1)
+    assert _joint_attributes(hass, "moving") == [False] * JOINT_COUNT, "3 s after the last"
+
+
+async def test_radian_joints_use_the_unit_threshold_and_precision(
+    hass: HomeAssistant,
+    mqtt_setup: Any,
+    make_config_entry: Callable[..., MockConfigEntry],
+    complete_hub_start: Callable[[BridgeHub], Awaitable[None]],
+    entity_registry: er.EntityRegistry,
+) -> None:
+    entry = make_config_entry()
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    await complete_hub_start(entry.runtime_data)
+    block = {**joints_block(), "unit": "rad", "limits": None, "names": ["base", "elbow"]}
+    fire_robot_message(hass, "announce", announce_with_joints_payload(joints=block))
+    fire_robot_message(hass, "availability", "online")
+    await hass.async_block_till_done()
+    first = _joint_entity_ids(hass)[0]
+    assert first is not None
+    registered = entity_registry.async_get(first)
+    assert registered is not None
+    assert registered.options["sensor"]["suggested_display_precision"] == 3
+    await _fire_joints(hass, positions=[0.5, -1.25])
+    await _fire_joints(hass, positions=[0.505, -1.23], seq=8)  # 0.005 rad no, 0.02 rad yes
+    assert _joint_attributes(hass, "moving", 2) == [False, True]
+
+
+async def test_layout_change_clears_the_moving_flags(hass: HomeAssistant, hub: BridgeHub) -> None:
+    await _fire_joints(hass)
+    await _fire_joints(hass, positions=[value + 1.0 for value in POSITIONS], seq=8)
+    robot = hub.robots[ROBOT_ID]
+    assert robot.joint_moving == (True,) * JOINT_COUNT
+    block = joints_block()
+    block["names"][1] = "shoulder"
+    fire_robot_message(hass, "announce", announce_with_joints_payload(joints=block))
+    await hass.async_block_till_done()
+    await hass.async_block_till_done()
+    assert robot.joint_moving is None and robot.joints_moving_until is None
+    assert _joint_attributes(hass, "moving") == [None] * JOINT_COUNT
+    assert _joint_attributes(hass, "velocity") == [None] * JOINT_COUNT

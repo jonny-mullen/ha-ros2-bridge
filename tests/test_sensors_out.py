@@ -13,7 +13,11 @@ import pytest
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.ros2_bridge.const import CONF_MIRROR_ENTITIES, CONF_TOPIC_PREFIX
+from custom_components.ros2_bridge.const import (
+    CONF_MIRROR_ENTITIES,
+    CONF_MIRROR_EXTRA_ATTRIBUTES,
+    CONF_TOPIC_PREFIX,
+)
 from custom_components.ros2_bridge.sensors_out import (
     SENSOR_ATTRIBUTE_ALLOWLIST,
     SensorMirror,
@@ -249,3 +253,28 @@ async def test_mirror_without_entities_is_quiet(rig: HubRig, hass: HomeAssistant
     await hass.async_block_till_done()
     rig.mqtt.async_publish.assert_not_called()
     await mirror.async_stop()
+
+
+# --------------------------------------------------------------------------- mirror_extra_attributes
+
+
+@pytest.mark.parametrize(
+    "rig_options",
+    [{CONF_MIRROR_ENTITIES: [MOTION], CONF_MIRROR_EXTRA_ATTRIBUTES: ["pm2_5", "moisture"]}],
+)
+async def test_extra_attributes_option_extends_the_allowlist(rig: HubRig) -> None:
+    rig.hass.states.async_set(
+        MOTION, "on", {"device_class": "motion", "pm2_5": 12, "moisture": 40, "latitude": 51.5}
+    )
+    mirror = await start_mirror(rig)
+    assert mirror.allowlist == SENSOR_ATTRIBUTE_ALLOWLIST | {"pm2_5", "moisture"}
+    payload = payload_of(rig, MOTION_TOPIC)
+    assert validate("sensor", payload) == []
+    assert payload["attributes"] == {"device_class": "motion", "pm2_5": 12, "moisture": 40}
+
+
+def test_sensor_payload_takes_an_allowlist() -> None:
+    state = State(MOTION, "on", {"latitude": 51.5, "device_class": "motion"})
+    payload = sensor_payload(MOTION, state, 1, frozenset({"latitude"}))
+    assert payload["attributes"] == {"latitude": 51.5}
+    assert payload["device_class"] == "motion", "the top-level fields are not filtered"

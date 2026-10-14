@@ -32,7 +32,7 @@ A refusal shows as an error on the button, as it does on the device page: pressi
 The same five sections for each arm, in this order on a phone:
 
 1. **Status**: the Problem badge on the heading, the State tile across the full width, then Last result and Problem side by side.
-2. **Joints**: seven gauge cards, two per row on a phone, one per joint in the announced order (J1 to J7). Each needle shows the joint's current position in degrees against its announced limits; the outer bands are amber so that a joint near its limit is obvious at a glance. Tapping a gauge opens the sensor's more-info dialog with its history and attributes.
+2. **Joints**: seven gauge cards, two per row on a phone, one per joint in the announced order (J1 to J7). Each needle shows the joint's current position in degrees against its announced limits; the outer bands are amber so that a joint near its limit is obvious at a glance. Tapping a gauge opens the sensor's more-info dialog with its history and attributes: the announced limits, the reported velocity (the fake arms report one per joint in degrees per second, zero at rest) and `moving`, which is on while the joint is in motion (`docs/sensors.md` has the rule and its two options).
 3. **Tasks**: the same five buttons as the Overview, then a row of named poses, Pick, Place and Wave. The pose buttons call `ros2_bridge.send_task` with `task: move_to` and `params: {pose: ...}`, which is how the gauges are made to move from the dashboard; Reset returns to the home pose. The fake executor interpolates between poses over `fake.task_duration_s` (2 s by default), so each press is a visible sweep. The buttons sit directly under the gauges so that a press and its effect are on one screen.
 4. **Last 30 minutes**: a history graph of the seven joint sensors with a fixed axis of -170 to 170 degrees, so a sweep looks the same whichever joints move. It needs the recorder to record the joint sensors (see below).
 5. **Task results**: a logbook card on the arm's task-result event entity, listing each outcome of the last 24 hours as it fires (the event type is the outcome: succeeded, cancelled, aborted, rejected, timed out or lost). Tapping an entry opens the entity, whose attributes hold the task, code, reason and duration of the latest result.
@@ -43,15 +43,50 @@ The fake executor's test tasks (Hang, Raise error, Clear error) have buttons on 
 
 The gauge card cannot read its range from an entity, so `min` and `max` are static values in the YAML, copied from the limits the robot announces (`docs/mqtt-contract.md`, the `joints` block). The fake executor announces seven joints in degrees, `j1`, `j2`, `j3`, `j5` and `j7` at -170 to 170 and `j4` and `j6` at -120 to 120; the file carries exactly those numbers, with amber bands over the outer 20 degrees (15 for the two narrower joints) and the theme's info colour for the working range. The same limits are on each joint sensor as the attributes `limit_min` and `limit_max`, and in the integration's diagnostics download, so a mismatch can be checked without reading the broker.
 
-If the robot's limits change (a different executor, a different arm) the gauges do not follow by themselves: edit `min`, `max` and the `from` values of the bands, and `min_y_axis` and `max_y_axis` on the history graph. A robot that announces `limits: null` needs a range of your choosing. A MoveIt executor reports radians, so the unit changes as well: the sensors carry it, but the gauges and the graph axis need matching numbers, for instance -3.2 to 3.2.
+If the robot's limits change (a different executor, a different arm) the gauges do not follow by themselves: edit `min`, `max` and the `from` values of the bands, and `min_y_axis` and `max_y_axis` on the history graph. A robot that announces `limits: null` needs a range of your choosing. A MoveIt executor reports radians, so the unit changes as well: the sensors carry it, but the gauges and the graph axis need matching numbers; the worked example under "Adapting it" does exactly that.
 
-## Adapting it to other robots
+## Adapting it
+
+Nothing in the file is read from the robot at run time: entity ids, the number of joints, gauge ranges, units and pose names are all written in. The rules first, then a worked example.
 
 - **Entity ids follow the device name, not the robot id.** Home Assistant builds every entity id from the device name in the announce and the entity's name, lower case with underscores: a robot announced as "Left arm" has `sensor.left_arm_state`, `button.left_arm_reset_to_home` and `sensor.left_arm_joint_1_shoulder_pan` (if its first joint is named `shoulder_pan`), whatever its robot id. The pose buttons are the exception: `ros2_bridge.send_task` takes the robot id (`robot_id: arm_left`).
-- **Joints.** One gauge and one history-graph entry per announced joint; the sensors are numbered from 1 in the announced order and carry the joint name after the number. Add or delete gauges to match, and set each gauge's `min`, `max` and bands from the announced limits.
+- **Joints.** One gauge and one history-graph entry per announced joint; the sensors are numbered from 1 in the announced order and carry the joint name after the number. Add or delete gauges to match, and set each gauge's `min`, `max` and bands from the announced limits (the `limit_min` and `limit_max` attributes of each sensor; null when the robot announces none).
+- **Units.** A gauge has no unit of its own and shows whatever number the sensor holds, so a robot that announces `rad` needs radian values for `min`, `max`, every band's `from` and the history graph's axis. The sensors' display precision defaults to one decimal for degrees and three for radians; change it per entity under its settings (the cog in the more-info dialog, Display precision) when a gauge's label should read finer or coarser.
 - **Tasks and poses.** The five task buttons exist for any executor that announces `reset`, `stop`, `pause` and `resume` without parameters (the MoveIt reference executor does); the Cancel button exists for every robot. The pose names are the fake executor's; use the names your executor accepts for `move_to`, or remove the row.
-- **More arms.** Copy one arm's section in the Overview and one whole arm view, then replace the ids and names.
+- **More arms, fewer arms.** Copy one arm's section in the Overview and one whole arm view, then replace the ids and names; for a single robot delete the second arm's view and Overview block, the file is valid with one.
 - **Headings and labels** are plain text; change them freely.
+
+### Worked example: a six-joint arm in radians
+
+A robot driven by the MoveIt reference executor, announced as "Left arm" with `robot.id: arm_left` and six joints named `shoulder_pan`, `shoulder_lift`, `elbow`, `wrist_1`, `wrist_2` and `wrist_3` (the group's joints in the order of `moveit.joint_names`, or of the first configured pose), in radians and, because the MoveIt executor announces no limits, with `limit_min` and `limit_max` null on every sensor. Its poses are the keys of `moveit.poses`, say `home`, `ready` and `handover`. Starting from the shipped file:
+
+1. **Entity ids.** The integration creates `sensor.left_arm_joint_1_shoulder_pan` to `sensor.left_arm_joint_6_wrist_3`, `sensor.left_arm_state`, `sensor.left_arm_last_result`, `binary_sensor.left_arm_problem`, `event.left_arm_task_result` and `button.left_arm_reset_to_home`, `_stop`, `_pause`, `_resume` and `_cancel_task`; confirm them on the device page. In the Overview's first block and the "Fake arm 1" view, replace `fake_arm_1` with `left_arm` on every `entity`, `entity_id` and `entities` line, and with `arm_left` on the three `robot_id` lines of the pose buttons; replace "Fake arm 1" with "Left arm" in the heading and the view title, and `fake-arm-1` with `left-arm` in the view's `path`.
+2. **Six gauges, not seven.** Delete the J7 gauge and the J7 entry of the history graph. Name the gauges after the joints (`Pan`, `Lift`, `Elbow`, `W1`, `W2`, `W3`) or keep J1 to J6.
+3. **A range in radians.** With no announced limits the range is yours to choose; the arm's URDF or the controller's joint limits are the place to read it from. A joint that turns through a full half-turn either way is -3.14 to 3.14, rounded outwards to -3.2 to 3.2 so that the needle never sits on the end stop; a wrist with a narrower mechanical range gets its own numbers. One gauge, with the amber band over the outer 0.3 rad:
+
+   ```yaml
+   - type: gauge
+     entity: sensor.left_arm_joint_1_shoulder_pan
+     name: Pan
+     min: -3.2
+     max: 3.2
+     needle: true
+     segments: &band_rad
+       - from: -3.2
+         color: var(--warning-color)
+       - from: -2.9
+         color: var(--info-color)
+       - from: 2.9
+         color: var(--warning-color)
+     grid_options:
+       columns: 6
+   ```
+
+   The other five gauges take `segments: *band_rad` (a joint with a different range needs its own anchor, as `band_120` does in the shipped file), and the history graph gets `min_y_axis: -3.2` and `max_y_axis: 3.2`. Delete the degree anchors `band_170` and `band_120` once nothing uses them.
+4. **Pose buttons.** Change `pose: pick`, `place` and `wave` to `ready`, `handover` and whatever else `moveit.poses` names, each with `robot_id: arm_left`; Reset stays, because the MoveIt executor announces `reset` too.
+5. **Movement on the screen.** The node publishes a new position only when a joint has moved by more than `telemetry.joints_min_delta` (0.01 rad by default for a radian robot) and at most `telemetry.joints_rate_hz` times a second (2 by default), so the needles step rather than glide; raise the rate and lower the delta on the node for a smoother sweep, at the cost of more recorder rows. `moving` on each sensor tells a conditional card or an automation that the joint is still travelling.
+
+The second arm's view and Overview block are repeated for a second robot in the same way, or deleted.
 
 ## The recorder and the 30-minute graph
 

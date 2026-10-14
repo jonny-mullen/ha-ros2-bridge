@@ -95,12 +95,15 @@ def test_defaults_match_the_design_table() -> None:
     assert (mqtt.reconnect_min_s, mqtt.reconnect_max_s) == (1, 30)
     assert mqtt.connect_timeout_s == 0.0
     assert mqtt.takeover_exit_after == 3
+    assert (mqtt.takeover_suspect_s, mqtt.takeover_window_s) == (10.0, 600.0)
     assert mqtt.max_payload_bytes == 16384
     assert mqtt.inbound_queue_max == 256
+    assert mqtt.offline_wait_s == 2.0
     assert not mqtt.tls.enabled and not mqtt.tls.insecure
     assert settings.topic_prefix == 'ros2_bridge'
     assert settings.ha_status_topic == 'homeassistant/status'
     assert settings.announce_jitter_s == 2.0
+    assert settings.logging_warn_interval_s == 10.0
     executor = settings.executor
     assert executor.spec == 'fake'
     assert (executor.call_warn_s, executor.cancel_grace_s, executor.health_poll_s) == (
@@ -113,6 +116,7 @@ def test_defaults_match_the_design_table() -> None:
     assert command.secret == '' and not command.hmac_required
     assert (command.max_age_cap_ms, command.clock_skew_tolerance_ms) == (30000, 2000)
     assert (command.dedupe_window_s, command.dedupe_size) == (300.0, 1024)
+    assert command.dedupe_write_interval_s == 1.0
     assert command.task_timeout_cap_s == 600.0
     assert command.keep_on_load_ms == 32000
     assert settings.data_dir == Path('~/.ros/ros2_ha_bridge').expanduser()
@@ -127,13 +131,39 @@ def test_defaults_match_the_design_table() -> None:
     assert telemetry.joints_enabled
     assert telemetry.min_delta_for('deg') == 0.5 and telemetry.min_delta_for('rad') == 0.01
     assert (settings.watchdog.mode, settings.watchdog.timeout_s) == ('none', 5.0)
+    assert settings.watchdog.ros_topic == '~/ha_link'
     mirror = settings.mirror
     assert (mirror.topics, mirror.availability_suffix, mirror.ros_topic) == (
         (),
         '/availability',
         '~/mqtt_in',
     )
+    assert mirror.ros_queue_depth == 10
     assert (settings.fake.task_duration_s, settings.fake.feedback_hz) == (2.0, 2.0)
+
+
+def test_the_newer_tunables_are_carried_through() -> None:
+    """Every value that was once a module constant reaches its settings field."""
+    settings = build(
+        **{
+            'mqtt.takeover_suspect_s': 0,
+            'mqtt.takeover_window_s': 60,
+            'mqtt.offline_wait_s': 0.5,
+            'logging.warn_interval_s': 0,
+            'command.dedupe_write_interval_s': 0,
+            'watchdog.ros_topic': ' /robots/left/ha_link ',
+            'mirror.ros_queue_depth': 100,
+        }
+    )
+    assert (settings.mqtt.takeover_suspect_s, settings.mqtt.takeover_window_s) == (0.0, 60.0)
+    assert settings.mqtt.offline_wait_s == 0.5
+    assert settings.logging_warn_interval_s == 0.0
+    assert settings.command.dedupe_write_interval_s == 0.0
+    assert settings.watchdog.ros_topic == '/robots/left/ha_link', 'stripped'
+    assert settings.mirror.ros_queue_depth == 100
+    shown = describe_settings(settings)
+    assert shown['mqtt.takeover_window_s'] == 60.0 and shown['mirror.ros_queue_depth'] == 100
+    assert executor_parameters(settings)['watchdog.ros_topic'] == '/robots/left/ha_link'
 
 
 def test_missing_names_take_the_default_and_unknown_names_are_ignored() -> None:
@@ -271,9 +301,16 @@ def test_integers_are_accepted_for_doubles_but_not_the_other_way_round() -> None
         ({'mqtt.reconnect_min_s': 5, 'mqtt.reconnect_max_s': 4}, 'mqtt.reconnect_max_s'),
         ({'mqtt.connect_timeout_s': -0.5}, 'mqtt.connect_timeout_s'),
         ({'mqtt.takeover_exit_after': -1}, 'mqtt.takeover_exit_after'),
+        ({'mqtt.takeover_suspect_s': -1}, 'mqtt.takeover_suspect_s'),
+        ({'mqtt.takeover_suspect_s': 'soon'}, 'mqtt.takeover_suspect_s'),
+        ({'mqtt.takeover_window_s': 0}, 'mqtt.takeover_window_s'),
+        ({'mqtt.takeover_window_s': -600}, 'mqtt.takeover_window_s'),
         ({'mqtt.max_payload_bytes': 0}, 'mqtt.max_payload_bytes'),
         ({'mqtt.inbound_queue_max': 0}, 'mqtt.inbound_queue_max'),
+        ({'mqtt.offline_wait_s': -0.1}, 'mqtt.offline_wait_s'),
         ({'announce.jitter_s': -1}, 'announce.jitter_s'),
+        ({'logging.warn_interval_s': -1}, 'logging.warn_interval_s'),
+        ({'logging.warn_interval_s': '10'}, 'logging.warn_interval_s'),
         ({'executor': ''}, 'executor'),
         ({'executor': '   '}, 'executor'),
         ({'executor.call_warn_s': -0.1}, 'executor.call_warn_s'),
@@ -283,6 +320,7 @@ def test_integers_are_accepted_for_doubles_but_not_the_other_way_round() -> None
         ({'command.clock_skew_tolerance_ms': -1}, 'command.clock_skew_tolerance_ms'),
         ({'command.dedupe_window_s': 0}, 'command.dedupe_window_s'),
         ({'command.dedupe_size': 0}, 'command.dedupe_size'),
+        ({'command.dedupe_write_interval_s': -1}, 'command.dedupe_write_interval_s'),
         ({'command.task_timeout_cap_s': 0}, 'command.task_timeout_cap_s'),
         ({'reply.ack_expiry_s': -1}, 'reply.ack_expiry_s'),
         ({'reply.result_expiry_s': -1}, 'reply.result_expiry_s'),
@@ -294,11 +332,16 @@ def test_integers_are_accepted_for_doubles_but_not_the_other_way_round() -> None
         ({'telemetry.joints_min_delta': -0.1}, 'telemetry.joints_min_delta'),
         ({'watchdog.mode': 'panic'}, 'watchdog.mode'),
         ({'watchdog.timeout_s': 0}, 'watchdog.timeout_s'),
+        ({'watchdog.ros_topic': ''}, 'watchdog.ros_topic'),
+        ({'watchdog.ros_topic': '   '}, 'watchdog.ros_topic'),
+        ({'watchdog.ros_topic': 7}, 'watchdog.ros_topic'),
         ({'mirror.topics': ['a/#/b']}, 'mirror'),
         ({'mirror.topics': ['']}, 'mirror'),
         ({'mirror.availability_suffix': 'availability'}, 'mirror'),
         ({'mirror.availability_suffix': '/+'}, 'mirror'),
         ({'mirror.ros_topic': ''}, 'mirror.ros_topic'),
+        ({'mirror.ros_queue_depth': 0}, 'mirror.ros_queue_depth'),
+        ({'mirror.ros_queue_depth': 10.0}, 'mirror.ros_queue_depth'),
         ({'fake.task_duration_s': 0}, 'fake.task_duration_s'),
         ({'fake.feedback_hz': -1}, 'fake.feedback_hz'),
     ],
@@ -318,6 +361,11 @@ def test_valid_edge_values_are_accepted() -> None:
             'mqtt.reconnect_min_s': 30,
             'mqtt.reconnect_max_s': 30,
             'mqtt.takeover_exit_after': 0,
+            'mqtt.takeover_suspect_s': 0,
+            'mqtt.offline_wait_s': 0,
+            'logging.warn_interval_s': 0,
+            'command.dedupe_write_interval_s': 0,
+            'mirror.ros_queue_depth': 1,
             'heartbeat.interval_s': 0,
             'reply.feedback_max_rate_hz': 0,
             'reply.retained_rejections_per_minute': 0,
@@ -329,6 +377,10 @@ def test_valid_edge_values_are_accepted() -> None:
         }
     )
     assert settings.mqtt.takeover_exit_after == 0 and settings.heartbeat_interval_s == 0.0
+    assert settings.mqtt.takeover_suspect_s == 0.0 and settings.mqtt.offline_wait_s == 0.0
+    assert settings.logging_warn_interval_s == 0.0
+    assert settings.command.dedupe_write_interval_s == 0.0
+    assert settings.mirror.ros_queue_depth == 1
     assert settings.watchdog.mode == 'stop_and_hold'
     assert settings.mirror.availability_suffix == ''
     assert settings.mirror.topics == ('zigbee2mqtt/+', 'ros2_bridge/ha/sensors/#')

@@ -45,7 +45,6 @@ from custom_components.ros2_bridge.const import (
     DEFAULT_OPTIONS,
     DOMAIN,
     READY_TIMEOUT_S,
-    REPLAY_SETTLE_S,
 )
 from custom_components.ros2_bridge.hub import BridgeHub
 
@@ -203,7 +202,7 @@ async def mqtt_setup(mqtt_mock_entry: Callable[[], Awaitable[Any]]) -> Any:
 def complete_hub_start(
     hass: HomeAssistant, freezer: FrozenDateTimeFactory
 ) -> Callable[[BridgeHub], Awaitable[None]]:
-    """Drive a started hub to ``ready`` and ``mqtt_connected`` and past ``REPLAY_SETTLE_S``.
+    """Drive a started hub to ``ready`` and ``mqtt_connected`` and past its settle period.
 
     The MQTT client performs queued subscriptions from a debounced background
     task, so the helper advances time a second at a time (waiting for background
@@ -211,7 +210,7 @@ def complete_hub_start(
     filters, which the mock normally does within two rounds. If it has not after
     ``READY_TIMEOUT_S`` rounds the production bound would have fired, so
     readiness is forced the same way. It then connects if needed and advances
-    past the settle period so the first reconciliation has run.
+    past the hub's ``replay_settle_s`` option so the first reconciliation has run.
     """
 
     async def _complete(hub: BridgeHub) -> None:
@@ -228,7 +227,7 @@ def complete_hub_start(
             hub._set_ready()
         if not hub.mqtt_connected:
             hub._on_connection_status(True)
-        freezer.tick(timedelta(seconds=REPLAY_SETTLE_S + 1))
+        freezer.tick(timedelta(seconds=hub.options.replay_settle_s + 1))
         async_fire_time_changed(hass, dt_util.utcnow())
         await hass.async_block_till_done(wait_background_tasks=True)
         assert hub.reconciled, "the settle timer did not fire"

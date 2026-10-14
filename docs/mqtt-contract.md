@@ -439,7 +439,7 @@ The full table, with a test id per row, is `docs/failure-modes.md`; `scripts/che
 |---|---|---|
 | Broker restart | Retained announce, state and availability republished on reconnect; QoS 1 replies queued by paho | Robots unavailable while HA's MQTT is down, then recover; in-flight commands resolve from retained replies or re-adoption |
 | HA restart or options reload mid-task | Store carries session and deadline; reconciliation after the replay burst | Running task re-adopted; its real result fires as `task_result`, never `late_result` |
-| ROS node restart | New `session`; stored session per command | Non-terminal commands for that robot become `lost` after a 1 s grace unless a result arrived |
+| ROS node restart | New `session`; stored session per command | Non-terminal commands for that robot become `lost` after `session_change_grace_s` (1 s by default) unless a result arrived |
 | Node connected but hung | Heartbeat stops while the MQTT keepalive continues | `problem` on (`heartbeat_stale`); entities unavailable after `heartbeat_unavailable_after_s` (30) |
 | Dead node, broker down at the moment of death (no LWT) | Same staleness rule | Unavailable after the same timer despite retained `online` |
 | QoS 1 redelivery, same process | Dedupe store republishes the stored ack | Nothing new |

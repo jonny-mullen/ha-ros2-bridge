@@ -6,7 +6,7 @@ Thank you for looking at ha-ros2-bridge. This page is short on purpose: the rule
 
 - Read [docs/architecture.md](docs/architecture.md) and [docs/mqtt-contract.md](docs/mqtt-contract.md).
 - Check [docs/decisions.md](docs/decisions.md). If your change reverses a recorded decision, say so in the pull request and add a dated entry; do not quietly contradict the log.
-- The project is pre-release. Until 0.1.0 is tagged, the delivery phases in `docs/research/2026-10-13-requirements-and-plan.md` set the order of work.
+- 0.1.0 is released. The delivery phases in `docs/research/2026-10-13-requirements-and-plan.md` set the order of work up to that tag; what comes after is the post-release track and the open questions in `docs/decisions.md`.
 
 ## File headers
 
@@ -35,10 +35,11 @@ Every Python file starts with exactly these two lines:
 - The ROS 2 half keeps `protocol.py`, `authoriser.py`, `task_manager.py`, `dedupe_store.py`, `watchdog.py`, `sensor_mirror.py` and `executors/` free of rclpy and paho imports so they test anywhere.
 - Both `protocol.py` copies must produce identical canonical JSON and HMAC signatures; `scripts/sync_contract.py --check` and the vendored schemas under `ros2/ros2_ha_bridge/ros2_ha_bridge/schemas/` must stay byte-identical to `contract/schemas/`.
 - Tests: the HA suite needs 95 percent coverage overall and 100 percent on `config_flow.py`; every row of `docs/failure-modes.md` names a test id that must exist.
+- Every value a site might need to change is a node parameter, a launch argument or an integration option, with its default documented in `docs/configuration.md` or `docs/install-ha.md`; a value that must stay fixed (a timing both halves assume under the contract, a bound that protects the broker or Home Assistant, the fake executor's fixture) is listed under "Fixed values" in `docs/configuration.md` with the reason. A new module constant an adopter would have to edit is a review finding, and so is text that assumes one person's machines, network or robots.
 
 ## Running the checks
 
-From the repository root, with the project virtual environment's interpreter (on the development PC that is `.venv`):
+From the repository root, with a virtual environment's interpreter (Python 3.12 or newer with the packages in `requirements_test.txt`):
 
 ```text
 python -m ruff check .

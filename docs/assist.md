@@ -23,7 +23,7 @@ Voice PE  ->  Assist pipeline (speech to text)
 1. The satellite (a Voice PE, any Assist satellite, or the text Assist dialog) hands the words to the Assist pipeline, which turns speech into text and passes it to the pipeline's conversation agent.
 2. Home Assistant's built-in conversation agent matches the text against the sentence templates in `custom_sentences/en/ros2_bridge.yaml` and produces the intent `Ros2BridgeSendTask` (or `Ros2BridgeCancelTask`) with up to three slots: `task`, `robot` and `area` (the robot slot is not called `name`, because Home Assistant resolves a slot of that name as an entity name before any custom intent runs).
 3. The integration's intent handler, registered once when Home Assistant starts, resolves which robot is meant and which announced task the words name (both rules are below), then publishes a command through the same hub the actions and buttons use. The command's `source` records `kind: intent`, the user id, the context id and the satellite's device id, so the acknowledgement and the robot's log show where it came from.
-4. The robot node authorises the command (allowlist, freshness, optional signature, one motion at a time) and publishes an acknowledgement. The handler waits for it for at most `min(ack_timeout_s, 1.5)` seconds, then speaks.
+4. The robot node authorises the command (allowlist, freshness, optional signature, one motion at a time) and publishes an acknowledgement. The handler waits for it for at most `min(ack_timeout_s, intent_ack_wait_s)` seconds (1.5 s by default; "Voice acknowledgement wait" in the options), then speaks.
 5. The robot runs the task and publishes its result. The integration matches it by id and fires `ros2_bridge_task_result` exactly once, with `status`, `code` and `reason`.
 6. An automation on that event speaks the outcome on the satellite. Nothing in the voice path blocks while the arm moves.
 
@@ -56,7 +56,7 @@ For a task:
 |---|---|
 | The robot accepted the command | "Starting {label} on {robot}" |
 | The robot refused it | "{robot} refused: {reason}" (the acknowledgement's reason, or its code when there is no reason) |
-| No acknowledgement arrived within 1.5 s | "Sent {label} to {robot}, I will report back" |
+| No acknowledgement arrived within `intent_ack_wait_s` (1.5 s by default) | "Sent {label} to {robot}, I will report back" |
 
 For a cancel the same three shapes are "Cancelling the current task on {robot}", "{robot} refused: {reason}" and "Sent cancel to {robot}, I will report back".
 
@@ -69,7 +69,7 @@ When the command cannot be sent at all, the handler answers with an error respon
 | The integration's entry is not loaded | "The robot bridge is not loaded" |
 | Its MQTT subscriptions are not confirmed yet | "The robot bridge is not ready yet" |
 | No robot has announced | "No robot has announced itself yet" |
-| More than one robot matches | "Which arm do you mean?" |
+| More than one robot matches | "Which robot do you mean?" |
 | The name matches no robot | "I do not know a robot called {robot}" |
 | The area is unknown, or has no robot | "I do not know an area called {area}", "There is no robot in {area}" |
 | The task is not in the robot's catalogue | "{robot} has no task called {task}" |
@@ -88,7 +88,7 @@ The handler tries these in order and stops at the first that gives exactly one r
 4. **The satellite's area.** With neither slot, the area of the device that heard the command (the Voice PE's own device in Home Assistant) is used in the same way, so "reset the arm" in the kitchen means the kitchen's robot.
 5. **The only robot.** With one robot announced and nothing else to go on, that robot is meant.
 
-Several candidates at any step give "Which arm do you mean?"; none gives the matching "I do not know" reply.
+Several candidates at any step give "Which robot do you mean?"; none gives the matching "I do not know" reply.
 
 ## How the task is resolved
 

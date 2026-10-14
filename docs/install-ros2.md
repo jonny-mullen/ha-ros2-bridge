@@ -1,8 +1,8 @@
 # Installing the ROS 2 side
 
-This page installs `ros2_ha_bridge`, the ROS 2 half of ha-ros2-bridge, on the machine that drives the robot: Ubuntu 24.04 with ROS 2 Jazzy (interview decision Q6). One `bridge_node` process runs per robot. The Home Assistant half is installed separately (`docs/install-ha.md`, phase 3), and the two only ever meet on the MQTT broker.
+This page installs `ros2_ha_bridge`, the ROS 2 half of ha-ros2-bridge, on the machine that drives the robot: Ubuntu 24.04 with ROS 2 Jazzy (interview decision Q6). One `bridge_node` process runs per robot. The Home Assistant half is installed separately (`docs/install-ha.md`), and the two only ever meet on the MQTT broker.
 
-Nothing here moves a real arm: the package ships with the `fake` executor selected, and a real executor is a deliberate change to the `executor` parameter (`docs/writing-an-executor.md`, phase 7).
+Nothing here moves a real arm: the package ships with the `fake` executor selected, and a real executor is a deliberate change to the `executor` parameter (`docs/writing-an-executor.md`).
 
 ## Requirements
 
@@ -127,7 +127,38 @@ source ~/bridge_ws/install/setup.bash
 ros2 launch ros2_ha_bridge bridge.launch.py params_file:=/path/to/arm_left.yaml
 ```
 
-The launch file starts one `bridge_node` with the parameters file, passes the two environment variables through, and respawns the node (two seconds delay, at most three retries) if it exits, which is also how a node that keeps losing its MQTT session to a duplicate robot id is stopped from flapping for ever. For a second robot, run a second launch with its own parameters file; `fleet.launch.py` starts several from one list.
+The launch file starts one `bridge_node` with the parameters file, passes the two environment variables through, and by default respawns the node (two seconds delay, at most three retries) if it exits, which is also how a node that keeps losing its MQTT session to a duplicate robot id is stopped from flapping for ever. For a second robot, run a second launch with its own parameters file and its own `node_name`, or start the whole fleet from one file (below).
+
+### Launch arguments
+
+`bridge.launch.py` takes these (`argument:=value` on the command line; the reference table is in `docs/configuration.md`, Launch arguments):
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `params_file` | the package's `config/bridge.example.yaml` (robot `fake_arm_1`, broker `localhost`) | The parameters file for the node. |
+| `node_name` | `bridge_node` | The ROS node name. It is the `~` in `mirror.ros_topic` (`~/mqtt_in`) and `watchdog.ros_topic` (`~/ha_link`), so give each node that shares a DDS domain its own name. |
+| `namespace` | empty | The ROS namespace the node runs in, for a graph that is namespaced per robot. |
+| `log_level` | `info` | The ROS log level (`debug` for more). |
+| `respawn`, `respawn_delay`, `respawn_max_retries` | `true`, `2.0`, `3` | The respawn policy: whether an exited node is started again, after how many seconds, and how many times (`-1` means without limit). Under systemd, `respawn:=false` lets the unit's `Restart=` count the restarts instead. |
+
+### A fleet from one file
+
+`ros2 launch ros2_ha_bridge fleet.launch.py fleet_file:=/path/to/fleet.yaml` starts one node per entry under `robots` (default file: the package's `config/fleet.example.yaml`, two fake arms; `log_level` and the three respawn arguments apply to every node). Each entry is the node name mapped to `params_file` (relative to the fleet file, absolute allowed, default `bridge.example.yaml` next to it), optional `parameters` (dotted overrides applied after the file), an optional `namespace`, and optionally its own `respawn`, `respawn_delay` or `respawn_max_retries`; or a list whose items are a bare path (node name = file stem) or `{name, params_file, parameters, namespace, ...}`. Node names must be unique. Example:
+
+```yaml
+robots:
+  arm_left:
+    params_file: arm_left.yaml
+    namespace: left
+  arm_right:
+    params_file: bridge.example.yaml
+    parameters:
+      robot.id: arm_right
+      robot.name: Right arm
+    respawn_max_retries: -1
+```
+
+The two secret variables are passed through to every node.
 
 Without launch, the same node runs as:
 
@@ -135,7 +166,20 @@ Without launch, the same node runs as:
 ros2 run ros2_ha_bridge bridge_node --ros-args --params-file /path/to/arm_left.yaml
 ```
 
-The log tells you what happened next. `connected to the MQTT broker as 'ros2_ha_bridge_arm_left'` is the good case. A refused connection is logged once in plain words (bad user name or password, not authorised, the broker does not support MQTT 5) and retried with backoff; a broker that cannot be reached at all is logged once and retried for ever unless `mqtt.connect_timeout_s` is set, in which case the node exits non-zero after that many seconds without an answer.
+(`-r __node:=left_bridge` and `-r __ns:=/left` after `--ros-args` set the name and the namespace on this route.)
+
+The log tells you what happened next. `connected to the MQTT broker as 'ros2_ha_bridge_arm_left'` is the good case. A refused connection is logged once in plain words (bad user name or password, not authorised, the broker does not support MQTT 5) and retried with backoff; a broker that cannot be reached at all is logged once and retried for ever unless `mqtt.connect_timeout_s` is set, in which case the node exits with status 3 after that many seconds without an answer.
+
+### Exit statuses
+
+A supervisor (the launch file's respawn, systemd `Restart=on-failure`) acts on the process exit status:
+
+| Status | Cause |
+|---|---|
+| `0` | A clean stop: Ctrl-C, SIGTERM, or ROS shutting down. |
+| `2` | A configuration error: a parameter the node cannot run with, an executor that cannot be loaded or set up, a TLS file that does not exist, an announce over 64 KiB. Logged as `configuration error: ...` and never worth a retry until the configuration changes. |
+| `3` | No CONNACK from the broker within `mqtt.connect_timeout_s` (only when that parameter is set). |
+| `4` | The MQTT session was taken over `mqtt.takeover_exit_after` times within `mqtt.takeover_window_s`: a second node is running with the same `robot.id`. |
 
 ## 8. Verify on the broker
 
@@ -168,12 +212,20 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
-`Restart=on-failure` sits above the launch file's own respawn: the launch file retries a crashing node three times, and if the whole launch gives up, systemd restarts it after five seconds.
+`Restart=on-failure` sits above the launch file's own respawn: the launch file retries a crashing node three times, and if the whole launch gives up, systemd restarts it after five seconds. To let systemd alone count the restarts, add `respawn:=false` to the `ros2 launch` line (the exit statuses above decide what `on-failure` restarts). A clean stop needs `mqtt.offline_wait_s` (2 s) for the retained `offline` plus one second for the ROS executor, well inside systemd's default `TimeoutStopSec`; keep that in mind if you shorten it.
 
 ## The Docker route
 
-For development, CI, or a PC without ROS 2, `tools/` packages the same node into a `ros:jazzy-ros-base` image with two fake arms, a test runner, a clock probe and an optional local broker; `tools/README.md` has the commands. It is the route the project's own end-to-end checks use. It is not a deployment route for a robot machine: the container has no access to the arm's drivers, and ROS 2 discovery is deliberately kept inside the compose network.
+For development, CI, or a PC without ROS 2, `tools/` packages the same node into a `ros:jazzy-ros-base` image with two fake arms, a test runner, a clock probe and an optional local broker; `tools/README.md` has the commands. It is the route the project's own end-to-end checks use. It is not a deployment route for a robot machine: the container has no access to the arm's drivers, the image is built without `moveit_msgs`, and ROS 2 discovery is deliberately kept inside the compose network, so a container there can never reach a `move_group`; it runs the fake executor only.
+
+Only the broker, the prefix and the two fake robot ids come from named variables in `.env` and `compose.yaml`. Any other parameter on `docs/configuration.md` (TLS, the watchdog, `mirror.topics`, the telemetry rate, `tasks.allow`) is set in a container either with a generic variable, `ROS2_HA_BRIDGE_PARAM_<NAME>` where `<NAME>` is the dotted name in upper case with dots as double underscores (`-e ROS2_HA_BRIDGE_PARAM_WATCHDOG__MODE=inhibit_new` on `docker compose run`, or under the service's `environment:`), or with a parameters file mounted into the container and named with `ROS2_HA_BRIDGE_PARAMS_FILE`:
+
+```text
+docker compose run --rm -v "$PWD/my_params.yaml:/params.yaml:ro" -e ROS2_HA_BRIDGE_PARAMS_FILE=/params.yaml -e ROS2_HA_BRIDGE_ROBOT_ID= -e ROS2_HA_BRIDGE_ROBOT_NAME= arm1
+```
+
+The named variables are applied on top of the file, which is why the two robot variables are passed empty here (empty means no override). A TLS certificate the file names must be mounted as well, and `data_dir` is inside the container unless a volume is mounted, so the dedupe store does not survive `docker compose down`; `tools/README.md` (What the entrypoint reads, Three limits of the rig) has the full variable table and the commented `volumes:` block in `compose.yaml` for both.
 
 ## Upgrading
 
-Pull the new sources, re-run step 3 if `requirements.txt` or `package.xml` changed, then `colcon build` and restart the node. The contract (schema 1) only ever gains optional fields, so a newer node keeps working with an older Home Assistant integration and the other way round; `docs/upgrading.md` (phase 8) will list anything that needs attention per release.
+Pull the new sources, re-run step 3 if `requirements.txt` or `package.xml` changed, then `colcon build` and restart the node. The contract (schema 1) only ever gains optional fields, so a newer node keeps working with an older Home Assistant integration and the other way round; `docs/upgrading.md` lists anything that needs attention per release.

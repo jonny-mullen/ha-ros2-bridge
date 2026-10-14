@@ -50,7 +50,7 @@ send_task:
       selector:
         number:
           min: 1000
-          max: 30000
+          max: 600000
           step: 100
           unit_of_measurement: ms
           mode: box
@@ -91,7 +91,7 @@ cancel_task:
       selector:
         number:
           min: 1000
-          max: 30000
+          max: 600000
           step: 100
           unit_of_measurement: ms
           mode: box

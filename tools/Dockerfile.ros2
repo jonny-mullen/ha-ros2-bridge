@@ -53,9 +53,10 @@ COPY contract contract
 RUN source "/opt/ros/$ROS_DISTRO/setup.bash" \
     && colcon build --event-handlers console_direct+
 
-# The entrypoint and the two probes. The sed strips a CRLF that a Windows checkout without
-# the repository's .gitattributes could introduce; a CRLF shebang breaks the entrypoint.
-COPY tools/entrypoint.sh tools/clock_check.py tools/latency_probe.py tools/
+# The entrypoint, its parameters renderer (tools/render_params.py) and the two probes. The sed
+# strips a CRLF that a Windows checkout without the repository's .gitattributes could
+# introduce; a CRLF shebang breaks the entrypoint.
+COPY tools/entrypoint.sh tools/render_params.py tools/clock_check.py tools/latency_probe.py tools/
 RUN sed -i 's/\r$//' tools/entrypoint.sh && chmod +x tools/entrypoint.sh
 
 ENTRYPOINT ["/ws/tools/entrypoint.sh"]

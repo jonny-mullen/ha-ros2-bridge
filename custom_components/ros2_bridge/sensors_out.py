@@ -4,24 +4,26 @@
 
 ``SensorMirror`` is a hub component (``hub.register_component``). It publishes
 every entity named in the ``mirror_entities`` option once at start and again
-on every state change, retained at QoS 0 with no expiry, in the contract's
-sensor shape: ``unavailable`` and ``unknown`` become ``state: null`` with
+on every state or attribute change (a state object change of any kind),
+retained at QoS 0 with no expiry, in the contract's sensor shape:
+``unavailable`` and ``unknown`` become ``state: null`` with
 ``available: false``, and ``attributes`` is filtered to
-:data:`SENSOR_ATTRIBUTE_ALLOWLIST` so large or private attributes never leave
-Home Assistant. Topics it has published are recorded in the Store's
-``published_sensor_topics``; at start any recorded topic the current options
-no longer produce (an entity left the option, or the prefix changed) is
-cleared with an empty retained publish and dropped from the list. Nothing is
-published while HA's MQTT client is disconnected; the backlog is flushed when
-it reconnects. ``async_clear_published_topics`` clears everything on entry
-removal.
+:data:`SENSOR_ATTRIBUTE_ALLOWLIST` plus the names in the
+``mirror_extra_attributes`` option, so large or private attributes never leave
+Home Assistant unless an adopter lists them by name. Topics it has published
+are recorded in the Store's ``published_sensor_topics``; at start any recorded
+topic the current options no longer produce (an entity left the option, or the
+prefix changed) is cleared with an empty retained publish and dropped from the
+list. Nothing is published while HA's MQTT client is disconnected; the backlog
+is flushed when it reconnects. ``async_clear_published_topics`` clears
+everything on entry removal.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import TYPE_CHECKING, Any, Final
 
 from homeassistant.components import mqtt
@@ -51,7 +53,9 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-#: The attributes a mirrored entity may carry onto the bus; everything else is dropped.
+#: The attributes a mirrored entity may carry onto the bus by default; everything else is
+#: dropped unless the ``mirror_extra_attributes`` option names it. This is the privacy
+#: baseline: nothing here can identify a person, a place or a credential.
 SENSOR_ATTRIBUTE_ALLOWLIST: Final[frozenset[str]] = frozenset(
     {
         "friendly_name",
@@ -122,8 +126,17 @@ def _nullable_str(value: Any) -> str | None:
     return None if value is None else str(value)
 
 
-def sensor_payload(entity_id: str, state: State | None, ts: int) -> dict[str, Any]:
-    """The contract's sensor payload for an entity's current ``State`` (or ``None``)."""
+def sensor_payload(
+    entity_id: str,
+    state: State | None,
+    ts: int,
+    allowlist: Collection[str] = SENSOR_ATTRIBUTE_ALLOWLIST,
+) -> dict[str, Any]:
+    """The contract's sensor payload for an entity's current ``State`` (or ``None``).
+
+    ``allowlist`` is the set of attribute names that may travel; the mirror
+    passes the built-in list extended by the ``mirror_extra_attributes`` option.
+    """
     domain, _, object_id = entity_id.partition(".")
     attributes: Mapping[str, Any] = {} if state is None else state.attributes
     value: str | None = None
@@ -139,9 +152,7 @@ def sensor_payload(entity_id: str, state: State | None, ts: int) -> dict[str, An
         "device_class": _nullable_str(attributes.get(ATTR_DEVICE_CLASS)),
         "unit": _nullable_str(attributes.get(ATTR_UNIT_OF_MEASUREMENT)),
         "attributes": {
-            key: _jsonable(value)
-            for key, value in attributes.items()
-            if key in SENSOR_ATTRIBUTE_ALLOWLIST
+            key: _jsonable(value) for key, value in attributes.items() if key in allowlist
         },
         "last_changed": None if state is None else state.last_changed.isoformat(),
         "ts": ts,
@@ -169,6 +180,8 @@ class SensorMirror:
         self.started = False
         #: Entity id to topic for every mirrored entity whose id forms a valid topic.
         self.topics: dict[str, str] = {}
+        #: The attribute names that travel: the built-in list plus the option's extras.
+        self.allowlist: frozenset[str] = SENSOR_ATTRIBUTE_ALLOWLIST
         self._pending: set[str] = set()
         self._pending_clear: set[str] = set()
         self._unsubscribe: CALLBACK_TYPE | None = None
@@ -186,6 +199,9 @@ class SensorMirror:
         if self.started:
             return
         self.started = True
+        self.allowlist = SENSOR_ATTRIBUTE_ALLOWLIST | frozenset(
+            self.hub.options.mirror_extra_attributes
+        )
         self.topics = {}
         for entity_id in self.hub.options.mirror_entities:
             topic = sensor_topic(self.hub.prefix, entity_id)
@@ -256,7 +272,9 @@ class SensorMirror:
                 target = self.topics.get(entity_id)
                 if target is None:
                     continue
-                payload = sensor_payload(entity_id, self.hass.states.get(entity_id), self.hub.now)
+                payload = sensor_payload(
+                    entity_id, self.hass.states.get(entity_id), self.hub.now, self.allowlist
+                )
                 if not await self._async_publish(target, encode_payload(payload)):
                     self._pending.add(entity_id)
                     break
