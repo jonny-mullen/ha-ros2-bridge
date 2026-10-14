@@ -15,7 +15,7 @@ The project is pre-release and nothing has been tagged yet. Until `v0.1.0` exist
 
 Please do not open a public issue for a security problem.
 
-- Contact: `security@example.invalid`. This is a placeholder; the maintainer will replace it with a real address, or with the repository's GitHub private vulnerability reporting link, before the first release (the public repository is open question (b) in `docs/decisions.md`).
+- Contact: `jonathanmullen1@gmail.com` (the maintainer). Please do not open a public issue for a vulnerability.
 - Include: the version or commit, the broker and Home Assistant versions, what you can make the arm do that you should not, and how.
 - You will get an acknowledgement within seven days, and a fix or a published mitigation before any public disclosure, agreed with you.
 

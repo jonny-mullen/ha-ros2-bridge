@@ -29,8 +29,8 @@ setup(
     # test requirement; without this line it falls back to unittest and runs nothing.
     tests_require=['pytest'],
     zip_safe=True,
-    maintainer='TODO maintainer name',
-    maintainer_email='TODO-maintainer@example.com',
+    maintainer='jonnytinkererofthings',
+    maintainer_email='jonathanmullen1@gmail.com',
     description='ROS 2 side of ha-ros2-bridge: a per-robot MQTT bridge node for Home Assistant.',
     license='Apache-2.0',
     entry_points={

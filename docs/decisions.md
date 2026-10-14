@@ -174,6 +174,8 @@ Choices made while adding the failure-modes table and its check, the safety and 
 
 - 2026-10-14: The git author on every commit is `jonnytinkererofthings` (Jonny's choice, history rewritten before anything was published); the copyright line in source headers stays "ha-ros2-bridge contributors".
 
+- 2026-10-14: The maintainer and security contact in `package.xml`, `setup.py` and `SECURITY.md` is Jonny's account email (his choice; the commits already carry it).
+
 ## Open questions for Jonny (asked one at a time)
 
 Each is asked on its own, in plain chat with numbered options, as the working agreement requires. Until answered, the proposed default is what the code and documents do.

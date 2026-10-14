@@ -8,7 +8,7 @@
     Assistant over MQTT, authorises and runs tasks through a TaskExecutor plugin, and
     publishes state, availability, heartbeat, acks and results.
   </description>
-  <maintainer email="TODO-maintainer@example.com">TODO maintainer name</maintainer>
+  <maintainer email="jonathanmullen1@gmail.com">jonnytinkererofthings</maintainer>
   <license>Apache-2.0</license>
   <url type="repository">https://github.com/jonnytinkererofthings/ha-ros2-bridge</url>
   <url type="bugtracker">https://github.com/jonnytinkererofthings/ha-ros2-bridge/issues</url>
