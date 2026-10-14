@@ -10,6 +10,7 @@ Everything here runs the ROS 2 half of ha-ros2-bridge in Docker on a development
 | `.env.example` | Placeholders for the variables `compose.yaml` reads. Copy to `.env`, which git ignores. |
 | `mosquitto/mosquitto.conf` | Anonymous Mosquitto for the `local-broker` profile. |
 | `clock_check.py` | Measures the MQTT round trip and, when the HA integration is running, the clock offset against Home Assistant. |
+| `latency_probe.py` | Measures command-to-ack latency (an unknown task name by default, so the executor is never consulted), the publish-to-PUBACK round trip and heartbeat period jitter; `--dry-run` prints the plan. |
 
 The node, the launch files and `config/bridge.example.yaml` live in `ros2/ros2_ha_bridge/`; this folder only packages and drives them.
 

@@ -43,7 +43,8 @@ From the repository root, with the project virtual environment's interpreter (on
 ```text
 python -m ruff check .
 python -m ruff format --check .
-python -m mypy custom_components ros2/ros2_ha_bridge/ros2_ha_bridge
+python -m mypy --strict ros2/ros2_ha_bridge/ros2_ha_bridge   # ROS 2 half, any Python 3.12+
+python -m mypy --strict custom_components                     # HA half, needs homeassistant installed (Python 3.14)
 python scripts/check_spdx.py
 python scripts/check_versions.py
 python scripts/validate_contract.py

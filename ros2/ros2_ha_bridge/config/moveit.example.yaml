@@ -1,0 +1,82 @@
+# ros2_ha_bridge: example parameter file for the MoveIt 2 executor (executor: moveit).
+# Copy it per robot, set robot.id, the broker settings, moveit.group_name and the poses, then:
+#   ros2 launch ros2_ha_bridge bridge.launch.py params_file:=/path/to/my_arm.yaml
+# Only what differs from config/bridge.example.yaml is repeated here; every other parameter keeps
+# its default (docs/configuration.md). Secrets stay out of this file: leave mqtt.password and
+# command.secret empty and export ROS2_HA_BRIDGE_MQTT_PASSWORD (and ROS2_HA_BRIDGE_COMMAND_SECRET
+# when signing is on) in the launching shell.
+#
+# The moveit executor needs moveit_msgs on the ROS 2 machine. It is a conditional dependency in
+# package.xml: export ROS2_HA_BRIDGE_WITH_MOVEIT=1 before "rosdep install", or install
+# ros-jazzy-moveit-msgs by hand. move_group itself comes from your robot's MoveIt configuration.
+/**:
+  ros__parameters:
+    robot:
+      # Robot id: ^[a-z][a-z0-9_]{0,31}$, never "ha"; required. (example)
+      id: arm_left
+      # Device name shown in Home Assistant; robot.id when empty.
+      name: Left arm
+      # Announce identity; empty means unknown.
+      manufacturer: ""
+      model: ""
+      sw_version: ""
+      suggested_area: ""
+    mqtt:
+      # MQTT broker host name or address. (example: the loopback name; set your broker)
+      host: localhost
+      port: 1883
+      # MQTT user name; empty connects anonymously.
+      username: ""
+      # MQTT password; empty reads the environment variable ROS2_HA_BRIDGE_MQTT_PASSWORD.
+      password: ""
+    # Topic prefix shared with the HA integration; no slashes at the ends, no wildcards.
+    topic_prefix: ros2_bridge
+    # The MoveIt 2 executor: the entry point "moveit", which is
+    # ros2_ha_bridge.executors.moveit:MoveItExecutor.
+    executor: moveit
+    # Seconds a cancel may take before the bridge forces the result. With moveit.hold_on_cancel
+    # true a cancelled move ends only when move_group confirms the hold, so give the controller
+    # time to stop; the default is 5.0 and the dotted spelling is needed because "executor" is a
+    # value above.
+    executor.cancel_grace_s: 5.0
+    moveit:
+      # The MoveIt planning group, as named in your SRDF (required). The NVIDIA Isaac Sim
+      # ros2_control reference uses the UR10 with ur_moveit_config, whose group is below;
+      # the Franka reference uses panda_arm.
+      group_name: ur_manipulator
+      # The MoveGroup action served by move_group.
+      action_name: /move_action
+      # MotionPlanRequest: allowed_planning_time (s) and num_planning_attempts.
+      planning_time_s: 5.0
+      num_attempts: 3
+      # MotionPlanRequest scaling factors, in (0, 1]. Keep them low in an assistive setting.
+      velocity_scale: 0.1
+      acceleration_scale: 0.1
+      # true: a cancelled move finishes only once move_group confirms the goal ended (the arm is
+      # holding), and the stop task clears a robot error only on that confirmation; false: both
+      # happen as soon as the cancel request has been sent.
+      hold_on_cancel: true
+      # The poses may come from a YAML file instead of the inline block below (the same mapping,
+      # optionally under a "poses" key); the refresh_poses task re-reads it without a node
+      # restart: changed positions and removed poses take effect at once, but a new pose name is
+      # refused by the node and by Home Assistant until the node restarts. Give one or the other:
+      # poses: /etc/ros2_ha_bridge/arm_left_poses.yaml
+      # Named poses: pose name -> {joint name: position in radians}. move_to offers these names
+      # as an enum and "home" also gets its own button in Home Assistant. The joint names must be
+      # the group's joints; the two poses below are UR-style examples, not values for your arm.
+      # Check every pose in RViz or the simulator before offering it to a household.
+      poses:
+        home:
+          shoulder_pan_joint: 0.0
+          shoulder_lift_joint: -1.5708
+          elbow_joint: 0.0
+          wrist_1_joint: -1.5708
+          wrist_2_joint: 0.0
+          wrist_3_joint: 0.0
+        rest:
+          shoulder_pan_joint: 0.0
+          shoulder_lift_joint: -2.3562
+          elbow_joint: 2.3562
+          wrist_1_joint: -1.5708
+          wrist_2_joint: -1.5708
+          wrist_3_joint: 0.0

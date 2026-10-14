@@ -44,5 +44,10 @@ repos:
         name: version strings agree across the repository
         entry: python scripts/check_versions.py
         language: system
-        files: ^(custom_components/ros2_bridge/(manifest\.json|const\.py)|ros2/ros2_ha_bridge/(package\.xml|setup\.py|ros2_ha_bridge/__init__\.py)|CHANGELOG\.md)$
+        files: |
+          (?x)^(
+            custom_components/ros2_bridge/(manifest\.json|const\.py)|
+            ros2/ros2_ha_bridge/(package\.xml|setup\.py|ros2_ha_bridge/__init__\.py)|
+            CHANGELOG\.md
+          )$
         pass_filenames: false

@@ -44,6 +44,8 @@ Replace `<owner>` with the repository's owner once it is published; until then, 
 
 The ROS dependencies come from rosdep. paho-mqtt comes from pip, and on Ubuntu 24.04 pip refuses to install into the system Python unless told that this is intended (PEP 668, "externally managed environment"). Two ways round it; pick one.
 
+To use the MoveIt 2 executor (`executor: moveit`), run the `rosdep install` line of either option as `ROS2_HA_BRIDGE_WITH_MOVEIT=1 rosdep install --from-paths src --ignore-src -y --rosdistro jazzy` instead, or `sudo apt install ros-jazzy-moveit-msgs` by hand; `package.xml` declares `moveit_msgs` under that condition only, so the plain command below does not install it.
+
 Option A, install into the system Python (simplest; the ROS 2 Python modules are there already):
 
 ```text

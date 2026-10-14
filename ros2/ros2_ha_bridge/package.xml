@@ -20,8 +20,16 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ros2launch</exec_depend>
-  <!-- fleet.launch.py reads its fleet file with PyYAML. -->
+  <!-- fleet.launch.py and the moveit executor's poses file reader use PyYAML. -->
   <exec_depend>python3-yaml</exec_depend>
+
+  <!-- moveit_msgs is needed only when the moveit executor is selected (executor: moveit).
+       Package format 3 has no optional dependency, so this uses its condition attribute (REP 149):
+       rosdep and colcon include the dependency only when ROS2_HA_BRIDGE_WITH_MOVEIT is set to 1
+       in the environment, for example "ROS2_HA_BRIDGE_WITH_MOVEIT=1 rosdep install ...".
+       Without it, install ros-jazzy-moveit-msgs by hand before selecting the moveit executor.
+       move_group itself comes from the robot's MoveIt configuration, not from this package. -->
+  <exec_depend condition="$ROS2_HA_BRIDGE_WITH_MOVEIT == 1">moveit_msgs</exec_depend>
 
   <!-- paho-mqtt 2.1.0 comes from pip (requirements.txt); Ubuntu 24.04 apt ships 1.6.1. -->
 

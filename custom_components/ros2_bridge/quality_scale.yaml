@@ -2,9 +2,10 @@
 #
 # Every rule of script/hassfest/quality_scale.py at Home Assistant 2026.10.1 is listed
 # (20 Bronze, 10 Silver, 21 Gold, 3 Platinum; the names were taken from the union of the
-# quality_scale.yaml files shipped with the core integrations of that release). Rules that
-# depend on files other phases of the project write are marked todo with the file named,
-# so this record states what exists today, not what is planned. Exemptions carry the reason.
+# quality_scale.yaml files shipped with the core integrations of that release). A rule is
+# done only when the evidence exists in this tree, and each docs-* rule names the page and
+# section that carries it (updated 2026-10-14); a rule whose evidence does not exist yet is
+# todo with the reason. Exemptions carry the reason.
 rules:
   # Bronze
   action-setup: done
@@ -26,18 +27,24 @@ rules:
     comment: >
       The integration has no pip requirements; it rides the mqtt integration's own client.
   docs-actions:
-    status: todo
-    comment: docs/install-ha.md and docs/configuration.md gain the three actions in phase 3.
+    status: done
+    comment: >
+      docs/install-ha.md, section 5 "Actions (services)": send_task, cancel_task and
+      get_robots with their fields, responses and YAML examples.
   docs-conditions:
     status: exempt
     comment: The integration provides no conditions.
   docs-high-level-description: done
   docs-installation-instructions:
-    status: todo
-    comment: docs/install-ha.md is written in phase 3.
+    status: done
+    comment: >
+      docs/install-ha.md, sections 1 and 2: install through HACS or by copying the folder,
+      then add by discovery or by hand.
   docs-removal-instructions:
-    status: todo
-    comment: docs/install-ha.md is written in phase 3.
+    status: done
+    comment: >
+      docs/install-ha.md, section 9 "Uninstalling": the robots' retained topics, deleting the
+      entry (which clears its sensor topics and store) and removing the files.
   docs-triggers:
     status: exempt
     comment: The integration provides no triggers; automations use the bus events.
@@ -61,11 +68,16 @@ rules:
   action-exceptions: done
   config-entry-unloading: done
   docs-configuration-parameters:
-    status: todo
-    comment: The Home Assistant options table is added to docs/configuration.md in phase 3.
+    status: done
+    comment: >
+      docs/install-ha.md, section 3 "Options": every option with its range, default and
+      effect. docs/configuration.md is the matching reference for the ROS 2 node.
   docs-installation-parameters:
-    status: todo
-    comment: docs/install-ha.md is written in phase 3.
+    status: done
+    comment: >
+      docs/install-ha.md, section 2 "Adding it by hand": the topic prefix and the optional
+      shared secret, the only two fields the flow asks for (the broker comes from the mqtt
+      integration).
   entity-unavailable: done
   integration-owner:
     status: todo
@@ -93,26 +105,44 @@ rules:
       Robots have no network address to update; everything reaches them through the broker
       the mqtt integration is already connected to.
   docs-data-update:
-    status: todo
-    comment: docs/architecture.md describes the push model; the user-facing page is phase 3.
+    status: done
+    comment: >
+      docs/install-ha.md, section 4 "What appears for each robot": entities update from the
+      robot's retained state, availability and heartbeat messages, with the unavailability
+      rules; docs/architecture.md describes the push model and the data flows.
   docs-examples:
-    status: todo
-    comment: docs/examples/ gains automations and the sentences file in phase 3.
+    status: done
+    comment: >
+      docs/examples/automations.yaml (kitchen idle, speak-back, notification),
+      docs/examples/sentence_trigger_automation.yaml, docs/examples/custom_sentences/en/
+      ros2_bridge.yaml, plus the YAML examples in docs/install-ha.md sections 5 and 6.
   docs-known-limitations:
-    status: todo
-    comment: Written with docs/failure-modes.md in phase 4.
+    status: done
+    comment: >
+      docs/failure-modes.md (every failure mode, what HA shows, and the rows with no test
+      yet), docs/assist.md "Limits", docs/install-ha.md (discovery only on the default
+      prefix) and SECURITY.md (the broker ACL gap).
   docs-supported-devices:
-    status: todo
-    comment: docs/install-ha.md (phase 3) states that any robot running ros2_ha_bridge works.
+    status: done
+    comment: >
+      docs/install-ha.md, opening paragraphs: any robot running ros2_ha_bridge works,
+      including one running the shipped fake executor; the executor plugin, not the
+      integration, decides which arms are driven.
   docs-supported-functions:
-    status: todo
-    comment: docs/install-ha.md is written in phase 3.
+    status: done
+    comment: >
+      docs/install-ha.md, sections 4 to 8: the entities, the three actions, the bus events,
+      the repairs and the voice intents.
   docs-troubleshooting:
-    status: todo
-    comment: docs/troubleshooting.md is written in phase 4.
+    status: done
+    comment: >
+      docs/troubleshooting.md: symptom to cause, rejection codes, the no_ack outcome, the
+      repairs, reading the diagnostics, watching the topics, where the logs are.
   docs-use-cases:
-    status: todo
-    comment: docs/install-ha.md and the example automations are written in phase 3.
+    status: done
+    comment: >
+      docs/sensors.md (the kitchen idle scenario, both sensor paths), docs/assist.md (voice),
+      docs/install-ha.md sections 5 and 6 and docs/examples/automations.yaml.
   dynamic-devices: done
   entity-category:
     status: exempt

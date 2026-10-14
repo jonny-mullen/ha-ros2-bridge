@@ -2,17 +2,33 @@
 
 Home Assistant and ROS 2, side by side, joined by MQTT. Home Assistant owns the sensors, dashboards, automations and voice; ROS 2 owns the robots. This repository ships both halves of the bridge and the written contract between them.
 
-**Status: pre-release, phase 0 (scaffold and contract). Nothing here moves an arm yet.**
+**Status: pre-release, 0.1.0 not yet tagged. Phases 0 to 3 (contract, ROS 2 node with the fake executor, Home Assistant integration) are implemented and unit-tested on this development PC; the phase 4 to 7 hardening, documentation and simulator material landed on 2026-10-14. Nothing here has moved an arm, and the live end-to-end run is still pending (see "Not yet verified").**
 
 ## What it is
 
 An HA custom integration plus a ROS 2 package, joined by a written MQTT contract. Not an add-on.
 
 - `ros2/ros2_ha_bridge/` (ament_python, Jazzy, paho-mqtt 2.1.0): one process per robot. Announces the robot and its task catalogue to HA, authorises and runs commands through a `TaskExecutor` plugin, publishes state, availability (Last Will), heartbeat, acks and results.
-- `custom_components/ros2_bridge/` (HACS, rides HA's own MQTT connection, no pip requirements): one device per announced robot, services `send_task`, `cancel_task` and `get_robots`, bus events for ack and result, two Assist intents, diagnostics and repairs.
+- `custom_components/ros2_bridge/` (HACS, rides HA's own MQTT connection, no pip requirements): one device per announced robot, actions `send_task`, `cancel_task` and `get_robots`, bus events for ack and result, two Assist intents, diagnostics and repairs.
 - `contract/`: JSON schemas, golden and must-reject examples and HMAC test vectors that both halves are tested against. Schema 1 only ever gains optional fields.
 
 Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node publishing MQTT discovery; ROS 2 cannot usefully run inside an HA add-on; an add-on cannot create HA entities or services by itself; stock MQTT discovery alone cannot give non-admin users or Assist a typed task action (`mqtt.publish` is admin-only since HA 2026.10); and HA's own MQTT connection means adopters enter broker details once, in HA.
+
+## What works today
+
+- **The ROS 2 node** (`bridge_node`) with the shipped `fake` executor: announce, availability by Last Will, retained state, heartbeat with counters, the contract's command handling in order (retained drop, size, UUID id, persisted dedupe, schema, robot id, optional HMAC, freshness, allowlist and params, state gating, executor), per-task retained acks and results with MQTT 5 expiry, pause and resume, task timeout with cancel grace and forced finish, the three watchdog modes, the sensor mirror onto `~/mqtt_in`, session takeover handling, TLS options, launch files for one robot and a fleet. The rclpy-free core and the contract tests run on native Windows Python; the rclpy and paho layers have their own tests for `colcon test` in the Jazzy container.
+- **A MoveIt 2 reference executor** (`ros2_ha_bridge/executors/moveit.py`): drives `/move_action` through an adapter and maps `MoveItErrorCodes` onto the result vocabulary. Unit-tested with a fake adapter only; it has not been run against a real `move_group` and is marked experimental.
+- **The Home Assistant integration** (`ros2_bridge`): config flow with MQTT discovery and prefix validation, options flow with reload, a push hub on seven wildcard subscriptions, a `CommandRegistry` backed by a Store so every command id ends in exactly one outcome across restarts and reloads, state, last-result and problem entities, a task-result event entity, one button per parameterless task plus cancel, the three actions with `wait: ack`, `result` or `none`, three bus events, two Assist intents, the normalised sensor republish, five repairs and redacted diagnostics. Test suite at 96 percent coverage (run through `tools/windows_test_shim` on this PC; natively on Ubuntu in CI).
+- **The contract** (`contract/`) with its validator, the vendored-copy check and the HMAC vectors; both `protocol.py` copies produce identical canonical JSON and signatures.
+- **The rig** (`tools/`): a `ros:jazzy-ros-base` image, `compose.yaml` with two fake arms, a test runner, an optional local broker, an MQTT client shell, `clock_check.py` (round trip and clock offset against HA), `latency_probe.py` (command-to-ack latency and heartbeat jitter; argument parser and dry run verified) and the chaos check list.
+- **Documentation**: every page listed under "Documentation" below, including the failure-modes table whose rows name real test ids, checked by `scripts/check_failure_modes.py`.
+
+## Not yet verified
+
+- **`colcon build` and `colcon test` inside the Jazzy container.** The Docker rig is written and the CI job exists, but the container has not been built on this PC (Docker Desktop's WSL backend needs a reset first), and CI has not run anywhere because the public repository does not exist yet (decision log, open question (b)).
+- **The live Home Assistant end-to-end run.** `tools/e2e_checklist.md` (steps 0 to 13, fake executor only, against the live HA and its broker) has not been run; its results table is empty. The first measured latency numbers come from that run (`docs/architecture.md`, Measured latency).
+- **The MoveIt executor against real MoveIt and Isaac Sim.** The simulator rehearsal at the Isaac site is pending (interview decisions Q12, Q13, Q20).
+- **A HACS install from a tagged release**, and the Mosquitto add-on ACL finding reproduced on a live add-on (`SECURITY.md`).
 
 ## Priorities
 
@@ -21,7 +37,7 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 3. **Honest about outcomes.** Every command id ends in exactly one named outcome: accepted or rejected with a reason, then succeeded, cancelled or aborted with a structured code, re-adopted across HA restarts, and synthesised only when the robot truly never answers.
 4. **Shareable.** Packaged for HACS and for `colcon` from day one, with nothing that assumes one household's entity names, topics or addresses.
 
-## Features (planned for 0.1.0)
+## Features (the 0.1.0 scope)
 
 - One HA device per robot, discovered from what the robot announces; scales from one arm to a fleet.
 - State sensor (`idle`, `busy`, `error`), last-result sensor, problem sensor, task-result event entity, one button per parameterless task plus cancel.
@@ -29,7 +45,7 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 - Assist intents so "reset the arm" works from a Voice PE, acknowledging at once and reporting the outcome afterwards.
 - Request-response with ROS 2 action semantics over MQTT: goal, feedback, result, cancel, with a structured result code (for example `collision`, `no_trajectory`, `timeout`) and a human-readable reason.
 - A fast sensor path (ROS 2 subscribes to Zigbee2MQTT directly) and a normalised sensor path (HA republishes any entity in one canonical schema).
-- Executor plugin interface with a shipped fake executor for testing without hardware, and a MoveIt 2 executor example for Isaac Sim or real arms.
+- Executor plugin interface with a shipped fake executor for testing without hardware, and a MoveIt 2 reference executor for Isaac Sim or real arms.
 - Application-layer authorisation in the node (UUID ids, allowlist, freshness window, dedupe, retained-command drop) and an optional shared-secret HMAC.
 - Apache-2.0, SPDX headers, CI on both halves, a contract test suite both must pass.
 
@@ -37,38 +53,82 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 
 ```text
 LICENSE  README.md  CHANGELOG.md  CONTRIBUTING.md  SECURITY.md
-hacs.json  pyproject.toml  requirements_test.txt  .pre-commit-config.yaml
+hacs.json  pyproject.toml  requirements_test.txt  .pre-commit-config.yaml  .editorconfig  .dockerignore
 .github/workflows/          ha.yml, ros2.yml, contract.yml, release.yml
+brand/                      empty until the HACS icon lands with the 0.1.0 release
 contract/                   README, schemas/, examples/{valid,invalid}/, hmac_vectors.json
-custom_components/ros2_bridge/   the Home Assistant integration (HACS)
-ros2/ros2_ha_bridge/        the ROS 2 package (ament_python, Jazzy)
-tests/                      HA integration tests
-scripts/                    validate_contract.py, sync_contract.py, check_spdx.py, check_versions.py
-docs/                       architecture, mqtt-contract, decisions, research/, and the rest as phases land
+custom_components/ros2_bridge/
+                            the Home Assistant integration (HACS): config_flow, hub, commands, store,
+                            services, intent, sensors_out, sensor, binary_sensor, button, event,
+                            diagnostics, strings.json, translations/en.json, icons.json, quality_scale.yaml
+ros2/ros2_ha_bridge/        the ROS 2 package (ament_python, Jazzy):
+                              ros2_ha_bridge/   bridge_node, mqtt_link, ros_adapters, parameters, protocol,
+                                                authoriser, task_manager, dedupe_store, watchdog, sensor_mirror,
+                                                executors/{base,fake,moveit}.py, schemas/ (vendored contract)
+                              launch/ config/ test/ package.xml setup.py
+tests/                      HA integration tests (pytest-homeassistant-custom-component), snapshots/
+scripts/                    validate_contract.py, sync_contract.py, check_spdx.py, check_versions.py,
+                            check_failure_modes.py
+tools/                      Dockerfile.ros2, compose.yaml, entrypoint.sh, mosquitto/, clock_check.py,
+                            latency_probe.py, e2e_checklist.md, windows_test_shim/, README.md
+docs/                       the pages listed below, examples/ (automations, sentences), research/
 ```
 
-Two folders from the design are not in a clone yet: `brand/` (the HACS icon) arrives with the 0.1.0 release in phase 8, and `tools/` (Docker rig, compose, probes, end-to-end checklist) arrives with phase 2.
+## Running the checks
 
-## Running the contract validator
-
-From the repository root, with the project virtual environment's interpreter (needs only `jsonschema` 4.18 or newer):
+From the repository root, with the project virtual environment's interpreter (`.venv` on the development PC; Python 3.12 or newer with `pytest`, `jsonschema`, `paho-mqtt`, `ruff` and `mypy`):
 
 ```text
 python scripts/validate_contract.py
 python scripts/sync_contract.py --check
+python scripts/check_versions.py
+python scripts/check_spdx.py
+python scripts/check_failure_modes.py
+python -m pytest ros2/ros2_ha_bridge/test -k "not node"
+python -m ruff check . && python -m ruff format --check .
+python -m mypy --strict ros2/ros2_ha_bridge/ros2_ha_bridge   # ROS 2 half, any Python 3.12+
+python -m mypy --strict custom_components                     # HA half, needs homeassistant installed (Python 3.14)
 ```
 
-The first checks that every schema compiles as JSON Schema draft 2020-12, that every example under `contract/examples/valid/` validates, that every example under `contract/examples/invalid/` is rejected, and that every HMAC vector recomputes; it exits non-zero with a per-file report on any mismatch. The second confirms the ROS 2 package's vendored copy of the schemas is byte-identical. Both halves' test suites import the same module, so the two implementations must agree on every fixture. `contract/README.md` describes the checks in full, and CI runs them as `contract.yml`.
+The contract validator checks that every schema compiles as JSON Schema draft 2020-12, that every example under `contract/examples/valid/` validates, that every example under `contract/examples/invalid/` is rejected, and that every HMAC vector recomputes; `sync_contract.py --check` confirms the ROS 2 package's vendored schemas are byte-identical. The rclpy tests skip without ROS 2 and run under `colcon test` in the container (`tools/README.md`). The Home Assistant suite needs Python 3.14 and Linux; `CONTRIBUTING.md` has the exact commands, including the Windows shim.
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md): the two halves, the threading model, the data flows, the executor plugin interface.
-- [docs/mqtt-contract.md](docs/mqtt-contract.md): every topic and payload with examples, command handling order, reply routing, failure behaviour.
-- [docs/decisions.md](docs/decisions.md): the dated decision log, including the interview record and the open questions.
-- [docs/research/README.md](docs/research/README.md): the research and design workflow outputs this project was built from.
-- [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+Start here:
 
-Install guides, configuration reference, writing an executor, Assist sentences, failure modes, safety and troubleshooting pages arrive with the phases that implement them (see the delivery phases in `docs/research/2026-10-13-requirements-and-plan.md`).
+- [docs/architecture.md](docs/architecture.md): the two halves, the threading model, the data flows, the executor plugin interface, measured latency.
+- [docs/mqtt-contract.md](docs/mqtt-contract.md): every topic and payload with examples, command handling order, reply routing, failure behaviour, versioning.
+- [docs/decisions.md](docs/decisions.md): the dated decision log, including the interview record and the open questions.
+
+Installing and configuring:
+
+- [docs/install-ha.md](docs/install-ha.md): the Home Assistant side: install, add, options, entities, actions, events, repairs, voice, removal.
+- [docs/install-ros2.md](docs/install-ros2.md): the ROS 2 side on Ubuntu 24.04 with Jazzy, as a service, and the Docker route.
+- [docs/configuration.md](docs/configuration.md): every node parameter with its default.
+- [docs/upgrading.md](docs/upgrading.md): upgrading either half, the schema and Store versioning rules, the Home Assistant churn watch-list, the ROS 2 distribution outlook.
+
+Using it:
+
+- [docs/sensors.md](docs/sensors.md): the fast and the normalised sensor paths and how a ROS 2 node reads them.
+- [docs/assist.md](docs/assist.md): voice control with Assist, the sentences, the replies and their limits.
+- [docs/examples/](docs/examples/): example automations, a sentence-trigger automation and the custom sentences file.
+- [docs/troubleshooting.md](docs/troubleshooting.md): symptom to cause, rejection codes, repairs, diagnostics, watching the bus, logs.
+
+Safety, security and failure behaviour:
+
+- [docs/safety.md](docs/safety.md): where safety sits and what the bridge is not.
+- [docs/security.md](docs/security.md): the authorisation model in depth; [SECURITY.md](SECURITY.md) is the reporting policy and the short form.
+- [docs/failure-modes.md](docs/failure-modes.md): every failure mode with its mechanism, what HA shows and the test that proves it.
+
+Extending and testing:
+
+- [contract/README.md](contract/README.md): the machine-checked contract.
+- [tools/README.md](tools/README.md): the Docker rig, the probes and the chaos checks.
+- [tools/e2e_checklist.md](tools/e2e_checklist.md): the manual end-to-end procedure on a live Home Assistant with the fake executor.
+- [docs/writing-an-executor.md](docs/writing-an-executor.md): the executor plugin interface, with the MoveIt 2 reference executor walked through.
+- [docs/simulator_checklist.md](docs/simulator_checklist.md): the Isaac Sim rehearsal checklist for the simulator site.
+- [docs/research/README.md](docs/research/README.md): the research and design workflow outputs this project was built from.
+- [CONTRIBUTING.md](CONTRIBUTING.md): headers, style, checks, the decision log rule.
 
 ## Requirements (target)
 

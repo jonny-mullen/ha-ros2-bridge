@@ -144,21 +144,21 @@ from std_msgs.msg import String
 
 class SensorListener(Node):
     def __init__(self) -> None:
-        super().__init__('sensor_listener')
-        self.create_subscription(String, '/bridge_node/mqtt_in', self.on_envelope, 10)
+        super().__init__("sensor_listener")
+        self.create_subscription(String, "/bridge_node/mqtt_in", self.on_envelope, 10)
 
     def on_envelope(self, msg: String) -> None:
         envelope = json.loads(msg.data)
-        if envelope['encoding'] != 'utf-8':
+        if envelope["encoding"] != "utf-8":
             return
-        topic = envelope['topic']
-        if topic.startswith('ros2_bridge/ha/sensors/'):
-            sensor = json.loads(envelope['payload'])
-            if not sensor['available']:
+        topic = envelope["topic"]
+        if topic.startswith("ros2_bridge/ha/sensors/"):
+            sensor = json.loads(envelope["payload"])
+            if not sensor["available"]:
                 return
             self.get_logger().info(f"{sensor['entity_id']} is {sensor['state']}")
-        elif topic.startswith('zigbee2mqtt/'):
-            raw = json.loads(envelope['payload'])
+        elif topic.startswith("zigbee2mqtt/"):
+            raw = json.loads(envelope["payload"])
             self.get_logger().info(f"{topic}: {raw}")
 
 
@@ -167,7 +167,7 @@ def main() -> None:
     rclpy.spin(SensorListener())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
 ```
 

@@ -38,6 +38,9 @@ setup(
         # a dotted "package.module:Class" works without an entry point.
         'ros2_ha_bridge.executors': [
             'fake = ros2_ha_bridge.executors.fake:FakeExecutor',
+            # Needs moveit_msgs at run time (package.xml, conditional); the module itself imports
+            # rclpy and moveit_msgs lazily, so listing it here costs nothing without MoveIt.
+            'moveit = ros2_ha_bridge.executors.moveit:MoveItExecutor',
         ],
     },
 )

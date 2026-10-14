@@ -122,6 +122,22 @@ Nothing on MQTT is an emergency stop. The modes exist for adopters whose safety 
 | `fake.task_duration_s` | `2.0` | How long `reset`, `move_to` and `fail` take. |
 | `fake.feedback_hz` | `2` | Feedback rate of a running fake motion task; `0` disables feedback. |
 
+## MoveIt executor (experimental)
+
+Read by `executor: moveit` (`ros2_ha_bridge/executors/moveit.py`), which has been unit-tested with a fake adapter only and not yet run against a real `move_group`. `config/moveit.example.yaml` is a complete parameters file. The executor needs `moveit_msgs`, which `package.xml` declares only under the condition `ROS2_HA_BRIDGE_WITH_MOVEIT == 1` (`docs/install-ros2.md`, step 3).
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `moveit.group_name` | required | The planning group (`ur_manipulator`, `panda_arm`). |
+| `moveit.poses` | required | Pose name to `{joint_name: position}` (inline, or flattened by rcl to `moveit.poses.<pose>.<joint>`), or the path of a YAML file holding that mapping, optionally under a `poses` key. At least one pose. |
+| `moveit.planning_time_s` | `5.0` | `allowed_planning_time`. |
+| `moveit.num_attempts` | `1` | `num_planning_attempts`. |
+| `moveit.velocity_scale`, `moveit.acceleration_scale` | `0.1`, `0.1` | The two scaling factors, in (0, 1]. |
+| `moveit.action_name` | `/move_action` | The MoveGroup action. |
+| `moveit.hold_on_cancel` | `true` | Whether a cancelled task finishes, and the `stop` task clears a robot error, only once move_group confirms the goal ended. |
+
+These are read from `ctx.parameters` when present and otherwise declared by the executor on the node; see `docs/writing-an-executor.md`, Parameters.
+
 ## Environment variables
 
 | Variable | Read when | Meaning |

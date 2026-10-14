@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   contract:
-    name: schemas, examples, vendored copies and versions
+    name: schemas, examples, vendored copies, versions and failure modes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -26,3 +26,5 @@ jobs:
         run: python scripts/sync_contract.py --check
       - name: Version strings agree
         run: python scripts/check_versions.py
+      - name: Every failure-modes row names an existing test
+        run: python scripts/check_failure_modes.py

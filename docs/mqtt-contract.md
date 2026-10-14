@@ -342,7 +342,7 @@ Topic `ros2_bridge/arm_left/task/6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b/result`, Q
 
 - `status` maps onto `action_msgs/GoalStatus`: `succeeded` is 4, `cancelled` is 5, `aborted` is 6. `goal_status` repeats the number.
 - `kind` repeats the task kind so HA can route control and query results away from the `last_result` sensor.
-- `code` matches `^[a-z][a-z0-9_]{0,63}$`. Recommended vocabulary: `ok`, `cancelled`, `preempted`, `collision`, `self_collision`, `no_trajectory`, `planning_failed`, `control_failed`, `timeout`, `invalid_goal`, `controller_error`, `inhibited`, `executor_error`, `executor_unresponsive`, `nothing_to_pause`, `unknown`.
+- `code` matches `^[a-z][a-z0-9_]{0,63}$`. Recommended vocabulary: `ok`, `cancelled`, `preempted`, `collision`, `self_collision`, `no_trajectory`, `planning_failed`, `control_failed`, `timeout`, `invalid_goal`, `controller_error`, `unavailable`, `inhibited`, `executor_error`, `executor_unresponsive`, `nothing_to_pause`, `unknown`.
 - `data` is free-form and carries the executor's raw detail (for a MoveIt 2 executor, the raw `MoveItErrorCodes` value) so automations can branch on the fine-grained cause.
 - HA-synthesised codes never travel on the wire: `no_ack`, `no_result`, `node_restarted`, `ha_restarted`.
 
@@ -402,7 +402,7 @@ After acceptance: `handle.finish()` publishes the retained result with `kind` an
 
 ## Failure behaviour
 
-The full table, with a test id per row, will live in `docs/failure-modes.md` (phase 4) and is enforced by `contract.yml`.
+The full table, with a test id per row, is `docs/failure-modes.md`; `scripts/check_failure_modes.py` (run by `contract.yml`) fails when a named test does not exist.
 
 | Failure | Mechanism | What HA shows |
 |---|---|---|

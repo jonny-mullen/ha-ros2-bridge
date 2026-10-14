@@ -110,7 +110,7 @@
       "enum": ["succeeded", "cancelled", "aborted"]
     },
     "result_code": {
-      "description": "Machine-readable result or error code. Recommended vocabulary: ok, cancelled, preempted, collision, self_collision, no_trajectory, planning_failed, control_failed, timeout, invalid_goal, controller_error, inhibited, executor_error, executor_unresponsive, nothing_to_pause, unknown. The HA-synthesised codes no_ack, no_result, node_restarted and ha_restarted never travel on the wire.",
+      "description": "Machine-readable result or error code. Recommended vocabulary: ok, cancelled, preempted, collision, self_collision, no_trajectory, planning_failed, control_failed, timeout, invalid_goal, controller_error, unavailable, inhibited, executor_error, executor_unresponsive, nothing_to_pause, unknown. The HA-synthesised codes no_ack, no_result, node_restarted and ha_restarted never travel on the wire.",
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]{0,63}$"
     },
