@@ -358,7 +358,20 @@ class RclpyLogHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             message = self.format(record)
-            self.method_for(record.levelno)(message)
+            # rclpy caches its logging features per call site (file, line and function)
+            # and raises "Logger severity cannot be changed between calls" when one site
+            # logs at two severities, so every severity gets a call site of its own here.
+            levelno = record.levelno
+            if levelno >= logging.CRITICAL:
+                self._ros_logger.fatal(message)
+            elif levelno >= logging.ERROR:
+                self._ros_logger.error(message)
+            elif levelno >= logging.WARNING:
+                self._ros_logger.warning(message)
+            elif levelno >= logging.INFO:
+                self._ros_logger.info(message)
+            else:
+                self._ros_logger.debug(message)
         except Exception:  # noqa: BLE001 (logging's own contract: emit never raises)
             self.handleError(record)
 

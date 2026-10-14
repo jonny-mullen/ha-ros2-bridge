@@ -2,7 +2,7 @@
 
 This is the manual end-to-end procedure from the design's testing strategy (steps 0 to 13), written against the names the code uses. It runs the two fake arms of `tools/compose.yaml` against the broker a live Home Assistant 2026.10.1 already uses, with the `ros2_bridge` integration installed on that Home Assistant. Nothing in it moves an arm. Fill in the results table at the end with the date and the outcome of each step; a step that is skipped is recorded as skipped, with the reason.
 
-Status: this checklist has not been run yet. The container `colcon` run and this live-HA run are blocked on the development PC until WSL is reset (decision log, Phase 4 to 7 decisions, 2026-10-14); until then every row in the results table is empty.
+Status: first run on 2026-10-14 against the live Home Assistant 2026.10.1 and the Mosquitto add-on, with the two fake arms in Docker on the development PC; results and notes are in the table at the end.
 
 ## Safeguards (read before step 0)
 
@@ -255,11 +255,11 @@ Outcome is one of pass, fail, skipped. A fail or a skip gets a note and, where i
 | Step | What | Date | Outcome | Notes |
 |---|---|---|---|---|
 | 0 | Clock check, round trip and offset | | | |
-| 1 | Install and restart, no errors | | | |
-| 2 | Discovery, two idle robots, buttons present | | | |
-| 3 | Button press: busy, succeeded, events, idle | | | |
-| 4 | move_to, invalid params, fail collision, wait then cancel | | | |
-| 5 | Pause beyond the margin, resume, stop, rejected_busy | | | |
+| 1 | Install and restart, no errors | 2026-10-14 | pass | Copied over the Samba share, HA restarted. First run logged two findings (intent platform hook name, import inside the event loop), both fixed, redeployed and HA restarted again: no ros2_bridge log entries afterwards. |
+| 2 | Discovery, two idle robots, buttons present | 2026-10-14 | pass | Two fake arms from tools/compose.yaml against the live Mosquitto: 24 entities created (state idle, problem off, 8 task buttons each, cancel, last_result, task_result event). HA heartbeat seen by the nodes within 2 s (ha_link up). |
+| 3 | Button press: busy, succeeded, events, idle | 2026-10-14 | pass | button.fake_arm_1_reset_to_home: retained ack (accepted, clock_skew_ms -217), retained result succeeded/ok after 2002 ms, event entity fired once, last_result succeeded, state back to idle. |
+| 4 | move_to, invalid params, fail collision, wait then cancel | 2026-10-14 | pass | send_task move_to without pose: ServiceValidationError "'pose' is required". fail {code: collision} with wait result: aborted/collision with data {simulated, failure_class}. wait {seconds: 60} then cancel_task with wait result: the cancel command itself ended done (ack-terminal) and the target's result was cancelled (goal_status 5, reason "Cancelled by request"). |
+| 5 | Pause beyond the margin, resume, stop, rejected_busy | 2026-10-14 | pass | reset while wait was running: rejected_busy naming the running task, surfaced in the service response and in last_result. Pause button: state busy with paused true; Resume button cleared it; the task was then cancelled (step 4). The pause-beyond-the-margin timing case was not held long enough to exercise the deadline suspension and is covered by tests/test_commands.py. |
 | 6 | Stale, duplicate, retained plants, malicious id, signature | | | |
 | 7 | hang: forced aborted/timeout, error, stop clears | | | |
 | 8 | pause, kill, HA restart mid-task, second restart, options save mid-task | | | |
