@@ -172,11 +172,13 @@ Choices made while adding the failure-modes table and its check, the safety and 
 
 - 2026-10-14: The Assist intents' robot slot is called `robot`, not `name`, because Home Assistant's conversation agent resolves a slot named `name` against exposed entity names and answers "not aware of any device called ..." before a custom intent runs; found on the live voice check, fixed in intent.py, the sentences example and the docs. Reason: the design named the slot `name` without that HA rule in view.
 
+- 2026-10-14: The git author on every commit is `jonnytinkererofthings` (Jonny's choice, history rewritten before anything was published); the copyright line in source headers stays "ha-ros2-bridge contributors".
+
 ## Open questions for Jonny (asked one at a time)
 
 Each is asked on its own, in plain chat with numbered options, as the working agreement requires. Until answered, the proposed default is what the code and documents do.
 
-1. **(a) Licence carriers.** `manifest.json` has no licence key, so Q18's literal wording ("licence string in manifest.json") cannot be met there. Proposed default: the licence lives in `LICENSE`, the SPDX headers, `package.xml` and `setup.py`, and ament_copyright is dropped in favour of `scripts/check_spdx.py` (it cannot read SPDX headers). Status: open.
+1. **(a) Licence carriers.** `manifest.json` has no licence key, so Q18's literal wording ("licence string in manifest.json") cannot be met there. Proposed default: the licence lives in `LICENSE`, the SPDX headers, `package.xml` and `setup.py`, and ament_copyright is dropped in favour of `scripts/check_spdx.py` (it cannot read SPDX headers). Status: decided 2026-10-14, Jonny chose to keep it as it is.
 2. **(b) When to create the public GitHub repository.** Creating it is an outward-facing action. Proposed default: not before the phase 0 scaffold has been reviewed locally; creation, the codeowner handle, release tags and the HACS listing each wait for an explicit go-ahead. Status: open.
 3. **(c) `hold_on_startup`.** Whether the node should call the executor's `stop_and_hold` once at start-up before accepting commands. Proposed default: off. Status: open.
 4. **(d) Missing ack.** Whether a command that never receives an ack should be reported as its own event type (`unknown`) or as `timeout` with `code: no_ack`. Proposed default: `timeout` with `code: no_ack`, documented as "outcome unknown", not as failure. Status: open.
