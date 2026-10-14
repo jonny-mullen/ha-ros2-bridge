@@ -2,9 +2,9 @@
 
 Home Assistant and ROS 2, side by side, joined by MQTT. Home Assistant owns the sensors, dashboards, automations and voice; ROS 2 owns the robots. This repository ships both halves of the bridge and the written contract between them.
 
-**Status: 0.1.0, released 2026-10-14. The ROS 2 package passes `colcon test` in the Jazzy container, the Home Assistant integration passes its suite and hassfest, and the live end-to-end checklist was run against a Home Assistant 2026.10.1 instance with two fake arms in Docker (`tools/e2e_checklist.md`). Nothing here has moved a real arm; the MoveIt executor is experimental until it has been rehearsed against a simulator or a real `move_group` (`docs/simulator_checklist.md`).**
+**Status: 0.2.0, released 2026-10-14. The ROS 2 package passes `colcon test` in the Jazzy container (1167 tests), the Home Assistant integration passes its suite (598 tests) and hassfest, and the live end-to-end checklist (steps 1 to 14) was run against a Home Assistant 2026.10.1 instance with fake arms in Docker (`tools/e2e_checklist.md`). Nothing here has moved a real arm; the MoveIt executor is experimental until it has been rehearsed against a simulator or a real `move_group` (`docs/simulator_checklist.md`).**
 
-Towards 0.2.0 (unreleased, 2026-10-14): optional joint telemetry. The announce may describe a robot's joints, the node publishes their positions on a non-retained topic at up to 2 Hz, Home Assistant makes one sensor per joint (the position, with the reported velocity and a `moving` flag as attributes), the fake executor simulates seven joints so a dashboard moves without hardware, and `docs/examples/dashboard.yaml` is a phone-first dashboard for the two fake arms (`docs/dashboard.md`, with a worked example for adapting it to another robot). Not yet run end to end on a live instance. A tunables audit the same day exposed every remaining constant a site might need to change as a node parameter, a launch argument, a rig variable or an integration option, and documented the values that stay fixed on purpose (`docs/configuration.md`, `docs/install-ha.md`, `CHANGELOG.md`).
+New in 0.2.0 (2026-10-14): optional joint telemetry. The announce may describe a robot's joints, the node publishes their positions on a non-retained topic at up to 2 Hz, Home Assistant makes one sensor per joint (the position, with the reported velocity and a `moving` flag as attributes), the fake executor simulates seven joints so a dashboard moves without hardware, and `docs/examples/dashboard.yaml` is a phone-first dashboard for the two fake arms (`docs/dashboard.md`, with a worked example for adapting it to another robot). Run end to end on a live instance (`tools/e2e_checklist.md`, step 14). A tunables audit the same day exposed every remaining constant a site might need to change as a node parameter, a launch argument, a rig variable or an integration option, and documented the values that stay fixed on purpose (`docs/configuration.md`, `docs/install-ha.md`, `CHANGELOG.md`).
 
 ## What it is
 
@@ -24,14 +24,14 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 - **The contract** (`contract/`) with its validator, the vendored-copy check and the HMAC vectors; both `protocol.py` copies produce identical canonical JSON and signatures.
 - **The rig** (`tools/`): a `ros:jazzy-ros-base` image, `compose.yaml` with two fake arms (any node parameter set through `ROS2_HA_BRIDGE_PARAM_*` variables or a mounted parameters file), a test runner, an optional local broker, an MQTT client shell, `clock_check.py` (round trip and clock offset against HA), `latency_probe.py` (command-to-ack latency and heartbeat jitter; argument parser and dry run verified) and the chaos check list.
 - **Documentation**: every page listed under "Documentation" below, including the failure-modes table whose rows name real test ids, checked by `scripts/check_failure_modes.py`.
+- **Joint telemetry and the example dashboard on the live instance** (checklist step 14, 2026-10-14): fourteen joint sensors on two fake arms, motion with `velocity` and `moving` during a slow move on a third arm configured through the rig's generic parameter variable, the dashboard installed through the Lovelace API. Its rendering has not been looked at by a person yet.
 
 ## Not yet verified
 
 - **The MoveIt executor against real MoveIt and Isaac Sim.** Unit-tested with a fake adapter only; the simulator rehearsal is pending (`docs/simulator_checklist.md`; interview decisions Q12, Q13, Q20).
 - **Signed commands end to end on the live broker** (the HMAC second pass of checklist step 6), a topic-prefix change on a live instance, and the node-side `mirror.topics` subscription outside the unit tests.
-- **A HACS install from a tagged release and CI on GitHub**, because the public repository does not exist yet (decision log, open question (b)); and the Mosquitto add-on ACL finding reproduced on a live add-on (`docs/security.md`).
+- **A HACS install from a tagged release on a live instance.** CI on GitHub runs on every push and is green for 0.2.0, and the HACS validation action passes, but installing the release through HACS has not been tried; and the Mosquitto add-on ACL finding reproduced on a live add-on (`docs/security.md`).
 - **A real Voice PE.** The voice check used Home Assistant's conversation service as a typed stand-in.
-- **Joint telemetry on a live broker and the example dashboard on a live Home Assistant.** Added 2026-10-14 towards 0.2.0; not yet part of the end-to-end checklist.
 
 ## Priorities
 
@@ -40,7 +40,7 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 3. **Honest about outcomes.** Every command id ends in exactly one named outcome: accepted or rejected with a reason, then succeeded, cancelled or aborted with a structured code, re-adopted across HA restarts, and synthesised only when the robot truly never answers.
 4. **Shareable.** Packaged for HACS and for `colcon` from day one, with nothing that assumes one household's entity names, topics or addresses.
 
-## Features (the 0.1.0 scope, plus the 0.2.0 joint telemetry)
+## Features (0.2.0)
 
 - One HA device per robot, discovered from what the robot announces; scales from one arm to a fleet.
 - State sensor (`idle`, `busy`, `error`), last-result sensor, problem sensor, task-result event entity, one button per parameterless task plus cancel.
@@ -49,7 +49,7 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 - Request-response with ROS 2 action semantics over MQTT: goal, feedback, result, cancel, with a structured result code (for example `collision`, `no_trajectory`, `timeout`) and a human-readable reason.
 - A fast sensor path (ROS 2 subscribes to Zigbee2MQTT directly) and a normalised sensor path (HA republishes any entity in one canonical schema).
 - Executor plugin interface with a shipped fake executor for testing without hardware, and a MoveIt 2 reference executor for Isaac Sim or real arms.
-- Optional joint telemetry (towards 0.2.0): an announce may carry a `joints` block (unit, names, limits, rate); the node publishes positions on `{prefix}/{robot_id}/joints` (QoS 0, never retained, 5 s expiry, on change only, at most `telemetry.joints_rate_hz` per second); Home Assistant creates one sensor per joint with the limits, the reported velocity and a `moving` flag as attributes and a documented recorder exclude; executors report positions through `BridgeContext.report_joints`. A phone-first example dashboard with gauges per joint (`docs/dashboard.md`).
+- Optional joint telemetry (0.2.0): an announce may carry a `joints` block (unit, names, limits, rate); the node publishes positions on `{prefix}/{robot_id}/joints` (QoS 0, never retained, 5 s expiry, on change only, at most `telemetry.joints_rate_hz` per second); Home Assistant creates one sensor per joint with the limits, the reported velocity and a `moving` flag as attributes and a documented recorder exclude; executors report positions through `BridgeContext.report_joints`. A phone-first example dashboard with gauges per joint (`docs/dashboard.md`).
 - Application-layer authorisation in the node (UUID ids, allowlist, freshness window, dedupe, retained-command drop) and an optional shared-secret HMAC.
 - Apache-2.0, SPDX headers, CI on both halves, a contract test suite both must pass.
 

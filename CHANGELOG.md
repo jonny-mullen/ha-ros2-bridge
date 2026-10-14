@@ -4,6 +4,22 @@ All notable changes to ha-ros2-bridge are recorded here. The format follows Keep
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-10-14
+
+Joint telemetry and the tunables audit. A robot's announce may describe its joints; the node publishes their positions and velocities on a non-retained topic at up to 2 Hz; Home Assistant makes one sensor per joint with `velocity` and `moving` attributes; the fake executor simulates seven joints so a dashboard moves without hardware; `docs/examples/dashboard.yaml` is a phone-first dashboard for the two fake arms. Every value a site might need to change is now a node parameter, a launch argument, a rig variable or an integration option with a documented default, and the values that stay fixed are listed with their reasons (`docs/configuration.md`). Contract schema 1 only gained optional fields, so a 0.1.0 half and a 0.2.0 half interoperate (`docs/upgrading.md`).
+
+Verified for this release:
+
+- `colcon test` inside `ros:jazzy-ros-base`: 1167 tests, 0 failures. The rclpy-free core suite on plain Python: 1113 passed, 2 skipped (the rclpy in-process tests, which run in the container).
+- The Home Assistant suite: 598 tests, 96.75 percent coverage; ruff, mypy strict, hassfest and the HACS validation green in CI.
+- The live end-to-end checklist step 14 (`tools/e2e_checklist.md`) on 2026-10-14 against Home Assistant 2026.10.1 with the Mosquitto add-on 7.1.1: fourteen joint sensors on two fake arms, motion visible with `velocity` and `moving` during a 12 s move on a third arm configured through `ROS2_HA_BRIDGE_PARAM_FAKE__TASK_DURATION_S`, the example dashboard installed through the Lovelace API.
+
+Known limitations: the MoveIt 2 executor remains experimental (never run against a real `move_group`); signed commands are tested in both suites but the live HMAC second pass is still pending; the dashboard's rendering and the new options form had not been looked at by a person when the tag was cut.
+
+The dated subsection below is the development record for this release.
+
 ### 2026-10-14 (towards 0.2.0)
 
 Joint telemetry: an additive extension of contract schema 1 so that a dashboard can show each arm's articulation (`docs/decisions.md`, revising interview decision Q17). Nothing on the wire that existed in 0.1.0 changed: a 0.1.0 Home Assistant ignores the new announce block and never subscribes to the new topic, and a 0.1.0 node never publishes either. New and on by default: a node whose executor announces joints (the fake always, the MoveIt executor when `moveit.joint_names` or the first pose names them) publishes the joints topic at `telemetry.joints_rate_hz` 2.0 from its first start after the upgrade, and Home Assistant creates one recorded sensor per joint; `docs/upgrading.md`, 0.2.0, gives the two ways to keep 0.1.0 behaviour. Not yet exercised on a live broker or opened on a live Home Assistant; no tag yet.
