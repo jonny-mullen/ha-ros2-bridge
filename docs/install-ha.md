@@ -64,7 +64,7 @@ Settings, Devices and services, ROS 2 Bridge, Configure. Saving reloads the entr
 
 ## 4. What appears for each robot
 
-One device per announced robot, named from the announce (`name`, `manufacturer`, `model`, `sw_version`, `hw_version`, `serial_number` and the suggested area, where the robot gave them). The entities below are named with the device name first, so a robot announced as "Left arm" gets `sensor.left_arm_state`, `button.left_arm_cancel_task` and so on.
+One device per announced robot, named from the announce (`robot`, `manufacturer`, `model`, `sw_version`, `hw_version`, `serial_number` and the suggested area, where the robot gave them). The entities below are named with the device name first, so a robot announced as "Left arm" gets `sensor.left_arm_state`, `button.left_arm_cancel_task` and so on.
 
 | Entity | States | What it means |
 |---|---|---|
@@ -162,7 +162,7 @@ Returns every announced robot. It takes no fields and must be called with a resp
         continue_on_error: true
 ```
 
-Each entry has `robot_id`, `device_id`, `name`, `available`, `state`, `task`, `task_id`, `paused`, `ha_link`, `problem`, `instance`, `session` and `tasks` (the catalogue: `name`, `label`, `kind`, `timeout_s`, `params`, `description`, `needs_params`).
+Each entry has `robot_id`, `device_id`, `robot`, `available`, `state`, `task`, `task_id`, `paused`, `ha_link`, `problem`, `instance`, `session` and `tasks` (the catalogue: `robot`, `label`, `kind`, `timeout_s`, `params`, `description`, `needs_params`).
 
 ## 6. Bus events
 

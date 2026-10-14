@@ -55,7 +55,7 @@ async def handle(
     if task is not None and intent_type == INTENT_SEND_TASK:
         slots["task"] = {"value": task}
     if name is not None:
-        slots["name"] = {"value": name}
+        slots["robot"] = {"value": name}
     if area is not None:
         slots["area"] = {"value": area}
     return await intent.async_handle(

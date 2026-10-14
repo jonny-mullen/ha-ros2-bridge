@@ -2,7 +2,7 @@
 
 Home Assistant and ROS 2, side by side, joined by MQTT. Home Assistant owns the sensors, dashboards, automations and voice; ROS 2 owns the robots. This repository ships both halves of the bridge and the written contract between them.
 
-**Status: pre-release, 0.1.0 not yet tagged. Phases 0 to 3 (contract, ROS 2 node with the fake executor, Home Assistant integration) are implemented and unit-tested on this development PC; the phase 4 to 7 hardening, documentation and simulator material landed on 2026-10-14. Nothing here has moved an arm, and the live end-to-end run is still pending (see "Not yet verified").**
+**Status: pre-release, 0.1.0 not yet tagged. Phases 0 to 7 are implemented and tested, the ROS 2 package passes `colcon test` in the Jazzy container (983 tests), and the live end-to-end checklist was run on 2026-10-14 against a Home Assistant 2026.10.1 instance with two fake arms in Docker (`tools/e2e_checklist.md`: steps 1 to 13 pass, three defects found and fixed the same day). Nothing here has moved a real arm; the MoveIt executor is experimental until the Isaac site rehearsal.**
 
 ## What it is
 
@@ -25,10 +25,10 @@ Why this shape: every living HA-to-ROS 2 precedent is a purpose-built ROS node p
 
 ## Not yet verified
 
-- **`colcon build` and `colcon test` inside the Jazzy container.** The Docker rig is written and the CI job exists, but the container has not been built on this PC (Docker Desktop's WSL backend needs a reset first), and CI has not run anywhere because the public repository does not exist yet (decision log, open question (b)).
-- **The live Home Assistant end-to-end run.** `tools/e2e_checklist.md` (steps 0 to 13, fake executor only, against the live HA and its broker) has not been run; its results table is empty. The first measured latency numbers come from that run (`docs/architecture.md`, Measured latency).
-- **The MoveIt executor against real MoveIt and Isaac Sim.** The simulator rehearsal at the Isaac site is pending (interview decisions Q12, Q13, Q20).
-- **A HACS install from a tagged release**, and the Mosquitto add-on ACL finding reproduced on a live add-on (`SECURITY.md`).
+- **The MoveIt executor against real MoveIt and Isaac Sim.** Unit-tested with a fake adapter only; the simulator rehearsal at the Isaac site is pending (`docs/simulator_checklist.md`; interview decisions Q12, Q13, Q20).
+- **Signed commands end to end on the live broker** (the HMAC second pass of checklist step 6), a topic-prefix change on a live instance, and the node-side `mirror.topics` subscription outside the unit tests.
+- **A HACS install from a tagged release and CI on GitHub**, because the public repository does not exist yet (decision log, open question (b)); and the Mosquitto add-on ACL finding reproduced on a live add-on (`docs/security.md`).
+- **A real Voice PE.** The voice check used Home Assistant's conversation service as a typed stand-in.
 
 ## Priorities
 

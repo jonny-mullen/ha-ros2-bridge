@@ -9,7 +9,7 @@
 # Slots:
 #   task  what to do, matched by task name ("reset", "move_to") or by the announced label
 #         ("reset to home", "move to named pose"); case does not matter.
-#   name  which robot, by id ("arm_left"), by spoken id ("arm left"), by the announced
+#   robot which robot, by id ("arm_left"), by spoken id ("arm left"), by the announced
 #         name ("Left arm") or by the device name you gave it in Home Assistant.
 #   area  the area whose robot is meant. Without a name or area the robot is taken from
 #         the area of the satellite that heard you, and failing that the only robot there
@@ -24,9 +24,9 @@ intents:
   Ros2BridgeSendTask:
     data:
       - sentences:
-          - "(tell|ask) {name} to {task}"
-          - "{task} (with|on|using) {name}"
-          - "[please] make {name} {task}"
+          - "(tell|ask) {robot} to {task}"
+          - "{task} (with|on|using) {robot}"
+          - "[please] make {robot} {task}"
       - sentences:
           - "{task} the (arm|robot) in the {area}"
           - "{task} the {area} (arm|robot)"
@@ -37,8 +37,8 @@ intents:
   Ros2BridgeCancelTask:
     data:
       - sentences:
-          - "(stop|cancel) [what] {name} [is doing]"
-          - "(stop|cancel) the [current] task on {name}"
+          - "(stop|cancel) [what] {robot} [is doing]"
+          - "(stop|cancel) the [current] task on {robot}"
       - sentences:
           - "(stop|cancel) the (arm|robot) in the {area}"
           - "(stop|cancel) the {area} (arm|robot)"
@@ -49,7 +49,7 @@ intents:
 lists:
   task:
     wildcard: true
-  name:
+  robot:
     wildcard: true
   area:
     wildcard: true

@@ -170,6 +170,8 @@ Choices made while adding the failure-modes table and its check, the safety and 
 - 2026-10-14: The ROS log handler calls a separate rclpy logger method per severity from its own line, because rclpy caches logging features per call site and raised "Logger severity cannot be changed between calls" on the first live run, losing the message. Reason: a defect only visible under real rclpy.
 - 2026-10-14: The end-to-end checklist was run against the live Home Assistant with the two fake arms in Docker; results are in `tools/e2e_checklist.md`. Measured command-to-ack round trip: median 49 ms, p95 59 ms (Docker Desktop on the Windows PC to the Mosquitto add-on and back).
 
+- 2026-10-14: The Assist intents' robot slot is called `robot`, not `name`, because Home Assistant's conversation agent resolves a slot named `name` against exposed entity names and answers "not aware of any device called ..." before a custom intent runs; found on the live voice check, fixed in intent.py, the sentences example and the docs. Reason: the design named the slot `name` without that HA rule in view.
+
 ## Open questions for Jonny (asked one at a time)
 
 Each is asked on its own, in plain chat with numbered options, as the working agreement requires. Until answered, the proposed default is what the code and documents do.

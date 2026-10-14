@@ -54,7 +54,7 @@ SPEECH_WHICH_ARM: Final = "Which arm do you mean?"
 SPEECH_NO_ROBOTS: Final = "No robot has announced itself yet"
 
 SLOT_TASK: Final = "task"
-SLOT_NAME: Final = "name"
+SLOT_NAME: Final = "robot"  # not "name": Home Assistant resolves a "name" slot as an entity name
 SLOT_AREA: Final = "area"
 
 
