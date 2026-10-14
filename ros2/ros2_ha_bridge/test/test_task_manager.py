@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 import threading
 import uuid
 from collections.abc import Callable, Sequence
@@ -47,6 +46,7 @@ from ros2_ha_bridge.executors.base import (
 from ros2_ha_bridge.protocol import AckPayload, DecodedCommand, RobotTopics
 from ros2_ha_bridge.task_manager import TaskManager, TaskManagerSettings
 
+from .conftest import assert_imports_without
 from .fakes import FakeClock, FakeScheduler
 
 ROBOT = 'arm_left'
@@ -328,9 +328,7 @@ def late_finish_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 def test_module_imports_neither_rclpy_nor_paho() -> None:
-    loaded = {name.split('.')[0] for name in sys.modules}
-    assert 'rclpy' not in loaded
-    assert 'paho' not in loaded
+    assert_imports_without('ros2_ha_bridge.task_manager', {'rclpy', 'paho'})
 
 
 # --------------------------------------------------------------------------- happy path

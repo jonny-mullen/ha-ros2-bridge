@@ -10,7 +10,6 @@ publish byte-identical payloads.
 from __future__ import annotations
 
 import json
-import sys
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -32,6 +31,7 @@ from ros2_ha_bridge.executors.fake import (
 from ros2_ha_bridge.protocol import AckPayload, Announce, DecodedCommand
 from ros2_ha_bridge.task_manager import TaskManager
 
+from .conftest import assert_imports_without
 from .fakes import FakeClock, FakeScheduler
 
 ROBOT = 'fake_arm'
@@ -166,9 +166,7 @@ def rig(clock: FakeClock, scheduler: FakeScheduler) -> Rig:
 
 
 def test_module_imports_neither_rclpy_nor_paho() -> None:
-    loaded = {name.split('.')[0] for name in sys.modules}
-    assert 'rclpy' not in loaded
-    assert 'paho' not in loaded
+    assert_imports_without('ros2_ha_bridge.executors.fake', {'rclpy', 'paho'})
 
 
 def test_catalogue_is_announceable(rig: Rig, schema_validator: Any) -> None:

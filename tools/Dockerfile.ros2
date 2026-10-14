@@ -1,0 +1,62 @@
+# syntax=docker/dockerfile:1
+# ha-ros2-bridge: ROS 2 Jazzy image for the bridge node, the fake arms and colcon test.
+#
+# Build from the repository root so that contract/ travels with the image:
+#
+#     docker build -f tools/Dockerfile.ros2 -t ha-ros2-bridge:dev .
+#
+# Layers are ordered so that a source edit never invalidates the apt, pip or rosdep layers:
+# requirements.txt first, then package.xml, then the sources. The build is reproducible
+# from a clean checkout; nothing here names a host, a user or a secret.
+
+FROM ros:jazzy-ros-base
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV ROS_DISTRO=jazzy \
+    PIP_BREAK_SYSTEM_PACKAGES=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    HA_ROS2_BRIDGE_CONTRACT_DIR=/ws/contract
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# python3-pip because the base image has none; the ament linters and pytest for colcon test;
+# faketime for the clock-skew chaos check in tools/README.md.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        python3-pip \
+        python3-colcon-common-extensions \
+        ros-jazzy-ament-flake8 \
+        ros-jazzy-ament-pep257 \
+        python3-pytest \
+        faketime \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /ws
+
+# pip requirements before the sources: paho-mqtt 2.1.0 (Ubuntu 24.04 apt ships 1.6.1) plus
+# jsonschema for the contract tests. PEP 668 is cleared by PIP_BREAK_SYSTEM_PACKAGES above.
+COPY ros2/ros2_ha_bridge/requirements.txt src/ros2_ha_bridge/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r src/ros2_ha_bridge/requirements.txt jsonschema
+
+# package.xml before the sources so the rosdep layer survives code edits. paho-mqtt keys are
+# skipped because the pip pin above is the one that counts.
+COPY ros2/ros2_ha_bridge/package.xml src/ros2_ha_bridge/package.xml
+RUN apt-get update \
+    && rosdep update --rosdistro "$ROS_DISTRO" \
+    && rosdep install --from-paths src --ignore-src -y --rosdistro "$ROS_DISTRO" \
+        --skip-keys "python3-paho-mqtt python-paho-mqtt-pip" \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY ros2/ros2_ha_bridge src/ros2_ha_bridge
+COPY contract contract
+RUN source "/opt/ros/$ROS_DISTRO/setup.bash" \
+    && colcon build --event-handlers console_direct+
+
+# The entrypoint and the clock probe. The sed strips a CRLF that a Windows checkout without
+# the repository's .gitattributes could introduce; a CRLF shebang breaks the entrypoint.
+COPY tools/entrypoint.sh tools/clock_check.py tools/
+RUN sed -i 's/\r$//' tools/entrypoint.sh && chmod +x tools/entrypoint.sh
+
+ENTRYPOINT ["/ws/tools/entrypoint.sh"]
+CMD ["launch"]

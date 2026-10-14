@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from typing import Any
 
 import pytest
@@ -53,6 +52,8 @@ from ros2_ha_bridge.protocol import (
     RobotTopics,
     StatePayload,
 )
+
+from .conftest import assert_imports_without
 
 ROBOT = 'arm_left'
 SESSION = '9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e'
@@ -103,9 +104,7 @@ def _command_bytes(**overrides: Any) -> bytes:
 
 
 def test_module_imports_neither_rclpy_nor_paho() -> None:
-    loaded = {name.split('.')[0] for name in sys.modules}
-    assert 'rclpy' not in loaded
-    assert 'paho' not in loaded
+    assert_imports_without('ros2_ha_bridge.protocol', {'rclpy', 'paho'})
 
 
 def test_closed_sets_match_the_contract() -> None:

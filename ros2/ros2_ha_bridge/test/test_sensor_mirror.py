@@ -13,7 +13,6 @@ from __future__ import annotations
 import base64
 import json
 import logging
-import sys
 from typing import Any
 
 import pytest
@@ -29,6 +28,7 @@ from ros2_ha_bridge.sensor_mirror import (
     SensorMirror,
 )
 
+from .conftest import assert_imports_without
 from .fakes import DEFAULT_EPOCH_MS, FakeClock
 from .fakes import topic_matches as broker_topic_matches
 
@@ -75,10 +75,7 @@ def mirror(clock: FakeClock, output: Recorder) -> SensorMirror:
 
 
 def test_module_imports_neither_rclpy_nor_paho() -> None:
-    assert sensor_mirror.__name__ in sys.modules
-    loaded = {name.split('.')[0] for name in sys.modules}
-    assert 'rclpy' not in loaded
-    assert 'paho' not in loaded
+    assert_imports_without('ros2_ha_bridge.sensor_mirror', {'rclpy', 'paho'})
 
 
 def test_counters_start_at_zero() -> None:

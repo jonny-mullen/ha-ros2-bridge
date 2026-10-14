@@ -1,0 +1,17 @@
+# ros2_ha_bridge: example fleet file for fleet.launch.py, two fake arms on one broker.
+#   ros2 launch ros2_ha_bridge fleet.launch.py fleet_file:=/path/to/fleet.yaml
+# Each entry under "robots" is one node (the key is the node name). params_file is relative
+# to this file unless absolute and defaults to bridge.example.yaml next to it; "parameters"
+# are dotted overrides applied after the file, which is how one shared file serves a fleet.
+# Broker credentials come from the params file and the environment, never from here.
+robots:
+  fake_arm_1:
+    params_file: bridge.example.yaml
+    parameters:
+      robot.id: fake_arm_1
+      robot.name: Fake arm 1
+  fake_arm_2:
+    params_file: bridge.example.yaml
+    parameters:
+      robot.id: fake_arm_2
+      robot.name: Fake arm 2

@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Sequence
 from typing import Any
 
@@ -23,6 +22,7 @@ from ros2_ha_bridge.protocol import DecodedCommand, HaHeartbeat
 from ros2_ha_bridge.task_manager import TaskManager
 from ros2_ha_bridge.watchdog import MIN_TIMEOUT_FACTOR, TICK_S, Watchdog
 
+from .conftest import assert_imports_without
 from .fakes import FakeClock, FakeScheduler
 
 ROBOT = 'arm_left'
@@ -62,9 +62,7 @@ class Rig:
 
 
 def test_module_imports_neither_rclpy_nor_paho() -> None:
-    loaded = {name.split('.')[0] for name in sys.modules}
-    assert 'rclpy' not in loaded
-    assert 'paho' not in loaded
+    assert_imports_without('ros2_ha_bridge.watchdog', {'rclpy', 'paho'})
 
 
 def test_construction_validates_mode_and_timeout(clock: FakeClock) -> None:

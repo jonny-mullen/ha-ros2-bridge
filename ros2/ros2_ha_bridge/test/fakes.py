@@ -31,7 +31,9 @@ of paho-mqtt 2.x that the phase 2 ``mqtt_link`` needs. Together they model:
   1 message twice, the second copy with ``dup=True``, and ``redeliver()`` for a
   publisher-side resend of a specific earlier message;
 - a refused CONNACK (``broker.connack_reason_code``) for the connect error
-  paths;
+  paths, and a broker that cannot be reached at all (``broker.unreachable``),
+  which produces no CONNACK and calls ``on_connect_fail`` as paho does;
+- ``enable_logger`` and ``disable_logger``, recorded in ``client.logger``;
 - paho's ``publish()`` validation (``ValueError`` for wildcards, an over-long
   topic, a bad QoS, ``TypeError`` for a bad payload type) and its behaviour
   while disconnected: QoS 1 messages are queued with ``rc=MQTT_ERR_NO_CONN``
@@ -563,6 +565,9 @@ class FakeBroker:
         self.duplicate_qos1 = False
         #: Non-zero makes every connect attempt fail with this CONNACK reason code.
         self.connack_reason_code = REASON_SUCCESS
+        #: When True no connect attempt reaches the broker: the client's ``on_connect_fail``
+        #: runs instead of ``on_connect`` (a TCP-level failure, which carries no reason code).
+        self.unreachable = False
         self._sessions: dict[str, _Session] = {}
         self._lock = threading.RLock()
         self._mids = itertools.count(1)
@@ -897,9 +902,12 @@ class FakeMqttClient:
         self.connect_attempts = 0
         self.subscriptions: list[Subscription] = []
         self.callback_errors: list[BaseException] = []
+        #: The logger given to ``enable_logger`` (``None`` until then, or after ``disable_logger``).
+        self.logger: logging.Logger | None = None
 
         # Callbacks, VERSION2 signatures.
         self.on_connect: Callable[..., Any] | None = None
+        self.on_connect_fail: Callable[..., Any] | None = None
         self.on_disconnect: Callable[..., Any] | None = None
         self.on_message: Callable[..., Any] | None = None
         self.on_subscribe: Callable[..., Any] | None = None
@@ -923,6 +931,13 @@ class FakeMqttClient:
 
     def user_data_set(self, userdata: Any) -> None:
         self.userdata = userdata
+
+    def enable_logger(self, logger: logging.Logger | None = None) -> None:
+        """Record the logger paho would route its own log lines to (nothing is logged here)."""
+        self.logger = logger if logger is not None else LOGGER
+
+    def disable_logger(self) -> None:
+        self.logger = None
 
     def tls_set(
         self,
@@ -1173,6 +1188,10 @@ class FakeMqttClient:
     def _attempt_connect(self) -> int:
         self._pending_connect = False
         self.connect_attempts += 1
+        if self.broker.unreachable:
+            # No CONNACK at all: paho calls on_connect_fail from its loop and retries later.
+            self._dispatch(lambda: self._call(self.on_connect_fail, self, self.userdata))
+            return MQTT_ERR_NO_CONN
         reason = self.broker._connect(self)
         if reason == REASON_SUCCESS:
             self._connected = True

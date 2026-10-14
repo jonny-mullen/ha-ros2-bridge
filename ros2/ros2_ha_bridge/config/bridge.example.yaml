@@ -1,0 +1,128 @@
+# ros2_ha_bridge: example parameter file, every parameter at its default except the three
+# marked "example". Copy it per robot, change robot.id (and the broker settings) and launch:
+#   ros2 launch ros2_ha_bridge bridge.launch.py params_file:=/path/to/my_robot.yaml
+# Secrets stay out of this file: leave mqtt.password and command.secret empty and export
+# ROS2_HA_BRIDGE_MQTT_PASSWORD and ROS2_HA_BRIDGE_COMMAND_SECRET in the launching shell.
+# Nested keys become dotted parameter names (robot: {id: x} is robot.id). Numbers written
+# with a decimal point are doubles; the node also accepts an integer for a double.
+/**:
+  ros__parameters:
+    robot:
+      # Robot id: ^[a-z][a-z0-9_]{0,31}$, never "ha"; required. (example)
+      id: fake_arm_1
+      # Device name shown in Home Assistant; robot.id when empty.
+      name: ""
+      # Announce identity; empty means unknown.
+      manufacturer: ""
+      # Announce identity; empty means unknown.
+      model: ""
+      # Announce identity; empty means unknown.
+      sw_version: ""
+      # Announce identity; empty means unknown.
+      hw_version: ""
+      # Announce identity; empty means unknown.
+      serial_number: ""
+      # Area suggested for the HA device; empty omits.
+      suggested_area: ""
+    mqtt:
+      # MQTT broker host name or address. (example: the loopback name; set your broker)
+      host: localhost
+      # MQTT broker port.
+      port: 1883
+      # MQTT user name; empty connects anonymously.
+      username: ""
+      # MQTT password; empty reads the environment variable ROS2_HA_BRIDGE_MQTT_PASSWORD.
+      password: ""
+      tls:
+        # Connect over TLS.
+        enabled: false
+        # CA certificate file; empty uses the system store.
+        ca_cert: ""
+        # Client certificate file for mutual TLS.
+        certfile: ""
+        # Client private key file for mutual TLS.
+        keyfile: ""
+        # Skip host name verification (testing only).
+        insecure: false
+      # MQTT keepalive; the will is published within about 1.5 times this.
+      keepalive_s: 15
+      # MQTT client id; empty derives ros2_ha_bridge_{robot.id}, which must stay unique.
+      client_id: ""
+      # Smallest delay between reconnect attempts.
+      reconnect_min_s: 1
+      # Largest delay between reconnect attempts.
+      reconnect_max_s: 30
+      # Exit non-zero without a CONNACK within this many seconds; 0 waits for ever.
+      connect_timeout_s: 0.0
+      # Exit non-zero after this many session takeovers within ten minutes; 0 never.
+      takeover_exit_after: 3
+      # Inbound size limit; larger messages are dropped unparsed.
+      max_payload_bytes: 16384
+      # Bound of the inbound queue between the network thread and the node.
+      inbound_queue_max: 256
+    # Topic prefix shared with the HA integration; no slashes at the ends, no wildcards.
+    topic_prefix: ros2_bridge
+    # Home Assistant's birth and will topic; "online" triggers a re-announce.
+    ha_status_topic: homeassistant/status
+    announce:
+      # Re-announce after HA birth within a random delay up to this many seconds.
+      jitter_s: 2.0
+    # Executor plugin: an entry-point name or package.module:Class. (example: the fake)
+    executor: fake
+    # The three executor.* settings are written as dotted keys because "executor" is itself
+    # a value above; rclpy reads both spellings as the same dotted parameter names.
+    # A plugin call longer than this marks the executor degraded.
+    executor.call_warn_s: 0.1
+    # Seconds a cancel may take before the result is forced.
+    executor.cancel_grace_s: 5.0
+    # Period of the executor health poll.
+    executor.health_poll_s: 1.0
+    # Task names announced to HA; empty (the default) means every task the executor offers.
+    # Uncomment to restrict, for example:
+    # tasks.allow: [reset, stop, pause, resume]
+    command:
+      # Shared HMAC secret; empty reads ROS2_HA_BRIDGE_COMMAND_SECRET; empty after both
+      # means commands are not signed.
+      secret: ""
+      # Cap on a command's own max_age_ms in the freshness rule.
+      max_age_cap_ms: 30000
+      # Clock skew tolerated either side of the freshness window.
+      clock_skew_tolerance_ms: 2000
+      # How long a command id is remembered; raised to reply.ack_expiry_s if smaller.
+      dedupe_window_s: 300.0
+      # How many command ids are remembered at most.
+      dedupe_size: 1024
+      # Upper bound on any task timeout, announced or requested.
+      task_timeout_cap_s: 600.0
+    # Directory holding {robot.id}/dedupe.json; empty keeps the dedupe store in memory.
+    data_dir: ~/.ros/ros2_ha_bridge
+    reply:
+      # Message Expiry Interval of retained acks.
+      ack_expiry_s: 120
+      # Message Expiry Interval of retained results.
+      result_expiry_s: 300
+      # Per-task feedback throttle; 0 disables throttling.
+      feedback_max_rate_hz: 2.0
+      # Rejected acks beyond this per minute are published non-retained.
+      retained_rejections_per_minute: 30
+    heartbeat:
+      # Period of the robot heartbeat; 0 disables it.
+      interval_s: 2.0
+    watchdog:
+      # none (informational), inhibit_new or stop_and_hold when the HA heartbeat stops.
+      mode: none
+      # HA heartbeat silence that counts as link down; floor of 2.5 x the HA interval.
+      timeout_s: 5.0
+    mirror:
+      # MQTT topics or filters mirrored onto the ROS topic together with their availability.
+      # Empty (the default) mirrors nothing. Uncomment to mirror, for example:
+      # topics: [zigbee2mqtt/kitchen_motion, ros2_bridge/ha/sensors/#]
+      # Suffix of each mirrored topic's availability sibling; empty disables tracking.
+      availability_suffix: /availability
+      # ROS topic (std_msgs/String envelopes) the mirrored messages are published on.
+      ros_topic: ~/mqtt_in
+    fake:
+      # Fake executor: how long reset, move_to and fail take.
+      task_duration_s: 2.0
+      # Fake executor: feedback rate of a running motion task; 0 disables.
+      feedback_hz: 2.0

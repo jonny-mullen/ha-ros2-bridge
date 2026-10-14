@@ -16,7 +16,6 @@ pass-through that the task manager finishes. The golden commands from
 from __future__ import annotations
 
 import logging
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -36,7 +35,7 @@ from ros2_ha_bridge.dedupe_store import DedupeStore
 from ros2_ha_bridge.executors.base import TaskRequest, TaskSpec
 from ros2_ha_bridge.protocol import DEFAULT_PREFIX, Counters, RobotError, RobotTopics
 
-from .conftest import VECTOR_SECRET
+from .conftest import VECTOR_SECRET, assert_imports_without
 from .fakes import FakeClock, FakeScheduler
 
 ROBOT = 'arm_left'
@@ -188,9 +187,7 @@ def rig(clock: FakeClock) -> Rig:
 
 
 def test_module_imports_neither_rclpy_nor_paho() -> None:
-    loaded = {name.split('.')[0] for name in sys.modules}
-    assert 'rclpy' not in loaded
-    assert 'paho' not in loaded
+    assert_imports_without('ros2_ha_bridge.authoriser', {'rclpy', 'paho'})
 
 
 def test_config_defaults_match_the_design_and_are_validated() -> None:

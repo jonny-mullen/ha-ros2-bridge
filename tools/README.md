@@ -1,0 +1,115 @@
+# tools: the local ROS 2 rig
+
+Everything here runs the ROS 2 half of ha-ros2-bridge in Docker on a development PC, with the fake executor standing in for the arms, against the broker Home Assistant already uses (interview decision Q14) or against a throwaway local broker for CI and offline work. Nothing in this folder touches a real arm.
+
+| File | Purpose |
+|---|---|
+| `Dockerfile.ros2` | `ros:jazzy-ros-base` plus paho-mqtt 2.1.0 from pip, the ament linters, pytest and a `colcon build` of `ros2/ros2_ha_bridge`. Built from the repository root so `contract/` travels with the image for the contract tests. |
+| `compose.yaml` | Services `arm1`, `arm2`, `test`, `clock-check`, `local-broker` (profile) and `mqtt` (profile), one named bridge network. |
+| `entrypoint.sh` | Sources ROS 2 and the workspace, renders a parameters file from the environment, then runs `launch`, `run`, `test`, `clock-check` or whatever command it is given. |
+| `.env.example` | Placeholders for the variables `compose.yaml` reads. Copy to `.env`, which git ignores. |
+| `mosquitto/mosquitto.conf` | Anonymous Mosquitto for the `local-broker` profile. |
+| `clock_check.py` | Measures the MQTT round trip and, when the HA integration is running, the clock offset against Home Assistant. |
+
+The node, the launch files and `config/bridge.example.yaml` live in `ros2/ros2_ha_bridge/`; this folder only packages and drives them.
+
+## Prerequisites
+
+- Docker Engine or Docker Desktop with Compose v2 (`docker compose version`).
+- A broker: the Mosquitto that Home Assistant uses (MQTT 5, reachable from this PC), or the `local-broker` profile below.
+- `tools/.env`: copy `tools/.env.example` and fill it in. The file is ignored by git; never commit it. `MQTT_USERNAME` empty means anonymous, which is what the local broker expects.
+
+All commands below are run from this folder (`tools/`), so `docker compose` finds `compose.yaml` and `.env` without flags.
+
+## Build
+
+```text
+docker compose build
+```
+
+That is the same as `docker build -f tools/Dockerfile.ros2 -t ha-ros2-bridge:dev .` from the repository root. The first build pulls the Jazzy base image and takes several minutes; later builds reuse the apt, pip and rosdep layers unless `requirements.txt` or `package.xml` changed.
+
+## Run two fake arms
+
+```text
+docker compose up arm1 arm2
+```
+
+Each container runs one `bridge_node` process with the fake executor, `arm1` as robot `fake_arm_1` and `arm2` as `fake_arm_2` (the `ROS2_HA_BRIDGE_ROBOT_ID` variable in `compose.yaml`). The node takes the broker host, port and user name from `.env` through the rendered parameters file, and the password from `ROS2_HA_BRIDGE_MQTT_PASSWORD` in its environment. Add `-d` to run in the background, `docker compose logs -f arm1` to follow one node, and `docker compose down` to stop and remove everything (the network included).
+
+To run a node with your own parameters file instead of the environment overrides, mount it and name it:
+
+```text
+docker compose run --rm -v "$PWD/my_params.yaml:/params.yaml:ro" -e ROS2_HA_BRIDGE_PARAMS_FILE=/params.yaml arm1
+```
+
+The environment overrides still apply on top of the mounted file (see the header of `entrypoint.sh`), so unset a variable in `.env` if the file should win.
+
+## Run the tests
+
+```text
+docker compose run --rm test
+```
+
+This runs `colcon test` on the package inside the image (pytest over `ros2/ros2_ha_bridge/test`, including the rclpy tests that skip on a machine without ROS, plus the ament linters once the package ships `test_flake8.py` and `test_pep257.py`) and then `colcon test-result --verbose`, whose exit code is the container's. Extra arguments go to `colcon test`, for example `docker compose run --rm test --pytest-args -k authoriser`.
+
+## Watch the bus
+
+The `mqtt` service is an `eclipse-mosquitto` client shell whose `$MQ` variable already holds the connection flags from `.env` (host, port, MQTT 5, and the credentials when a user name is set), so the password never appears on the host command line. Quote the argument with single quotes so your own shell leaves `$MQ` and `$TOPIC_PREFIX` alone.
+
+```text
+docker compose run --rm mqtt
+docker compose run --rm mqtt 'mosquitto_sub $MQ -v -t "$TOPIC_PREFIX/fake_arm_1/#"'
+```
+
+The first form subscribes to everything under the prefix and prints retained availability, announce (with `instance`) and state at once, then the heartbeat every two seconds. A password containing spaces does not survive the unquoted `$MQ` expansion; use one without for this rig.
+
+## Send a command by hand
+
+A valid command needs a fresh UUID4 id and a current `issued_at`; the shell inside the `mqtt` service can make both:
+
+```text
+docker compose run --rm mqtt 'ID=$(cat /proc/sys/kernel/random/uuid); NOW=$(( $(date +%s) * 1000 )); mosquitto_pub $MQ -q 1 -D publish message-expiry-interval 5 -t "$TOPIC_PREFIX/fake_arm_1/cmd" -m "{\"schema\":1,\"id\":\"$ID\",\"type\":\"task\",\"robot_id\":\"fake_arm_1\",\"task\":\"reset\",\"params\":{},\"issued_at\":$NOW,\"max_age_ms\":5000,\"timeout_s\":null,\"source\":{\"origin\":\"tools\",\"kind\":\"manual\"}}"; echo "sent $ID"'
+```
+
+Within a second the retained ack appears on `{prefix}/fake_arm_1/task/<id>/ack`, the state goes `busy`, and after the fake task duration (2 s) the retained result and the `idle` state follow. Watch them with the subscription above. With `ROS2_HA_BRIDGE_COMMAND_SECRET` set on the node, an unsigned command like this one is answered `rejected_unauthorised`, which is the expected result of that check.
+
+## Local broker profile (CI and offline)
+
+```text
+docker compose --profile local-broker up -d local-broker
+```
+
+Then set `MQTT_HOST=local-broker` and `MQTT_USERNAME=` (empty) in `.env`; every other service reaches the broker by that name on the compose network. The listener is anonymous and is not published on the host. `docker compose --profile local-broker down` removes it.
+
+## Clock check
+
+```text
+docker compose run --rm clock-check
+docker compose run --rm clock-check --threshold-s 0.5 --require-heartbeat
+```
+
+The probe publishes a few timestamped messages under `{prefix}/ha/probe/<client>` and reads them back to measure the broker round trip, then waits for the HA integration's heartbeat on `{prefix}/ha/heartbeat` and reports how far this machine's clock is from Home Assistant's. It exits 1 when the offset exceeds the threshold (1 s by default; the node tolerates 2 s of skew), 2 when the broker cannot be reached, 3 when `--require-heartbeat` is given and no heartbeat arrives. Before the HA integration exists (phase 3) only the round trip is reported. The container's clock is the Docker VM's clock; run `python3 tools/clock_check.py` natively on the robot machine for the number that matters there.
+
+## Chaos checks
+
+The design's chaos list, with the exact commands. Keep a `docker compose run --rm mqtt` subscription open in a second terminal while running them.
+
+| Check | Command | What to expect |
+|---|---|---|
+| Kill (Last Will) | `docker compose kill arm1` | The broker publishes the retained `offline` on `{prefix}/fake_arm_1/availability` within a few seconds (the socket closes with the process; at most 1.5 x the 15 s keepalive). `docker compose up -d arm1` brings it back with a new `session` and republished announce and state. |
+| Pause (connected but silent) | `docker compose pause arm1` then `docker compose unpause arm1` | The heartbeat stops at once while the TCP session stays up, so HA shows `problem` within about 6 s and makes the entities unavailable after 30 s; the broker drops the silent client after about 22 s and publishes the will. `unpause` clears it. |
+| Broker restart | `docker compose --profile local-broker restart local-broker` | Both nodes log the disconnect, reconnect with paho's backoff, and republish availability, announce and state; nothing is lost for in-flight commands because replies are retained with expiry. (Local profile only; never restart the live Home Assistant broker for a test.) |
+| Clock skew on the node (faketime) | `docker compose run --rm -e FAKETIME_DONT_FAKE_MONOTONIC=1 arm1 faketime '+30s' /ws/tools/entrypoint.sh launch` | The node believes it is 30 s ahead; every fresh command is answered `rejected_future` with `clock_skew_ms` around -30000, and `clock_check.py` against the live HA would report the same offset. `FAKETIME_DONT_FAKE_MONOTONIC` keeps DDS and the timers on the real monotonic clock. |
+| Stale command (no faketime) | Send the command above with `NOW=$(( ($(date +%s) - 60) * 1000 ))` | `rejected_stale` with the measured skew; the same id sent again republishes that stored ack byte for byte. |
+| Retained plant, node connected | `docker compose run --rm mqtt 'mosquitto_pub $MQ -q 1 -r -t "$TOPIC_PREFIX/fake_arm_1/cmd" -m "{\"schema\":1,\"id\":\"planted\"}"'` | Dropped at once (Retain As Published), `dropped_retained` increments in the next heartbeat, and the node clears the topic: `docker compose run --rm mqtt 'mosquitto_sub $MQ -v -t "$TOPIC_PREFIX/fake_arm_1/cmd" -W 3'` prints nothing. No ack, no crash. |
+| Retained plant, node stopped | `docker compose stop arm1`, plant as above, `docker compose start arm1` | Dropped at the first connect; the topic is cleared and the counter increments. |
+| Malicious id | Send the command above with `ID='x/#'` | Dropped before any topic is built: `dropped_invalid_id` increments, no ack is published and the node keeps heartbeating. |
+| Takeover (duplicate robot id) | `docker compose run --rm -e ROS2_HA_BRIDGE_ROBOT_ID=fake_arm_1 arm2` while `arm1` runs | Both nodes connect with client id `ros2_ha_bridge_fake_arm_1`; the broker disconnects one with reason code 142 (`Session taken over`), each logs the ERROR naming the other node, backs off, and the one that reaches three takeovers within ten minutes exits non-zero. HA (phase 4) raises `duplicate_robot_id`. |
+| Oversize payload | Send 17 KiB on the command topic, for example `-m "$(head -c 17408 /dev/zero \| tr '\0' x)"` | `dropped_oversize` increments; nothing else happens. |
+
+After the checks, `docker compose down` removes the arms, the one-off containers and the network. Retained acks and results expire by themselves (120 s and 300 s); a retained `offline` is replaced the next time the node connects.
+
+## Networking
+
+`compose.yaml` creates the user-defined bridge network `ha-ros2-bridge` and puts every service on it; no service uses host networking. DDS traffic never leaves that network: the containers have no interface on the LAN, and `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST` keeps each node's discovery inside its own container, so the two fake arms never discover each other and nothing multicasts onto the development PC's network. MQTT is the only traffic that leaves, to `MQTT_HOST`. `ROS_DOMAIN_ID` (42 by default) is there for hygiene only. The image runs the node as root inside the container, which is fine for a disposable rig and not a pattern for a deployment; `docs/install-ros2.md` describes a native install.

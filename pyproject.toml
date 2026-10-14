@@ -31,6 +31,7 @@ module = [
   "rclpy",
   "rclpy.*",
   "std_msgs.*",
+  "rcl_interfaces.*",
   "action_msgs.*",
   "launch",
   "launch.*",

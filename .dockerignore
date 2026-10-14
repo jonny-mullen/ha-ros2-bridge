@@ -1,0 +1,23 @@
+# Build context for tools/Dockerfile.ros2 (built from the repository root).
+# Version control, virtual environments, tool caches, colcon output and local secrets never
+# enter the image. Trees the image does not copy are excluded too, to keep the context small.
+.git
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+**/.mypy_cache
+**/.pytest_cache
+**/.ruff_cache
+**/*.egg-info
+ros2/build
+ros2/install
+ros2/log
+tools/.env
+.github
+.vscode
+.idea
+brand
+custom_components
+docs/research
+tests

@@ -14,11 +14,14 @@
   <url type="bugtracker">https://github.com/TODO-owner/ha-ros2-bridge/issues</url>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>action_msgs</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ros2launch</exec_depend>
+  <!-- fleet.launch.py reads its fleet file with PyYAML. -->
+  <exec_depend>python3-yaml</exec_depend>
 
   <!-- paho-mqtt 2.1.0 comes from pip (requirements.txt); Ubuntu 24.04 apt ships 1.6.1. -->
 

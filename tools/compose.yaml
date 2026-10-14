@@ -1,0 +1,115 @@
+# ha-ros2-bridge local rig: two fake arms, the colcon test run, an optional local broker,
+# the clock probe and an MQTT client shell, all on one named bridge network.
+# Usage is in tools/README.md. Run every command from this folder (tools/).
+#
+# Networking. Every service sits on the user-defined bridge network "ha-ros2-bridge".
+# DDS discovery, the ROS 2 side of each node, never leaves that network: no service uses
+# host networking, and ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST keeps each node's discovery
+# inside its own container, so two fake arms never see each other over DDS and nothing
+# reaches the LAN. The only traffic that leaves the network is MQTT, to MQTT_HOST.
+#
+# Variables come from tools/.env (copy tools/.env.example and fill it in; the file is
+# ignored by git). The defaults below are placeholders, never a real host or account.
+# The password and the command secret reach the node only as environment variables,
+# which the node reads when the matching parameter is empty.
+
+name: ha-ros2-bridge
+
+x-bridge-environment: &bridge-environment
+  MQTT_HOST: ${MQTT_HOST:-broker.example.invalid}
+  MQTT_PORT: ${MQTT_PORT:-1883}
+  MQTT_USERNAME: ${MQTT_USERNAME:-}
+  ROS2_HA_BRIDGE_MQTT_PASSWORD: ${ROS2_HA_BRIDGE_MQTT_PASSWORD:-}
+  ROS2_HA_BRIDGE_COMMAND_SECRET: ${ROS2_HA_BRIDGE_COMMAND_SECRET:-}
+  TOPIC_PREFIX: ${TOPIC_PREFIX:-ros2_bridge}
+  ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
+  RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+  ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+
+x-bridge-service: &bridge-service
+  image: ha-ros2-bridge:dev
+  build:
+    context: ..
+    dockerfile: tools/Dockerfile.ros2
+  init: true
+  stop_grace_period: 15s
+  networks:
+    - rig
+
+services:
+  # One fake arm per container, one process per robot, as the design requires. No restart
+  # policy on purpose: a node that exits after repeated session takeovers must stay down so
+  # the chaos check can see it, and a crash must be visible rather than papered over.
+  arm1:
+    <<: *bridge-service
+    container_name: ha-ros2-bridge-arm1
+    environment:
+      <<: *bridge-environment
+      ROS2_HA_BRIDGE_ROBOT_ID: fake_arm_1
+      ROS2_HA_BRIDGE_ROBOT_NAME: Fake arm 1
+
+  arm2:
+    <<: *bridge-service
+    container_name: ha-ros2-bridge-arm2
+    environment:
+      <<: *bridge-environment
+      ROS2_HA_BRIDGE_ROBOT_ID: fake_arm_2
+      ROS2_HA_BRIDGE_ROBOT_NAME: Fake arm 2
+
+  # colcon test inside the image, then colcon test-result --verbose (its exit code is the
+  # container's). Run with: docker compose run --rm test
+  test:
+    <<: *bridge-service
+    profiles: [test]
+    environment: *bridge-environment
+    command: ["test"]
+
+  # The clock probe (tools/clock_check.py) against MQTT_HOST. Extra arguments are passed on:
+  # docker compose run --rm clock-check --threshold-s 0.5
+  clock-check:
+    <<: *bridge-service
+    profiles: [clock-check]
+    environment: *bridge-environment
+    entrypoint: ["/ws/tools/entrypoint.sh", "clock-check"]
+
+  # Anonymous Mosquitto for CI and offline use (tools/mosquitto/mosquitto.conf). Reachable
+  # from the other services as MQTT_HOST=local-broker. Not published on the host on purpose.
+  local-broker:
+    image: eclipse-mosquitto:2
+    profiles: [local-broker]
+    container_name: ha-ros2-bridge-broker
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - rig
+
+  # An MQTT client shell from the eclipse-mosquitto image, for watching the bus and for the
+  # chaos checks. $MQ holds the connection flags built from tools/.env (host, port, MQTT 5,
+  # credentials when a username is set), so the password never appears on the host command
+  # line. With no argument it subscribes to everything under the prefix:
+  #   docker compose run --rm mqtt
+  #   docker compose run --rm mqtt 'mosquitto_pub $MQ -q 1 -t "$TOPIC_PREFIX/fake_arm_1/cmd" -m "..."'
+  mqtt:
+    image: eclipse-mosquitto:2
+    profiles: [tools]
+    environment: *bridge-environment
+    networks:
+      - rig
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        MQ="-h $$MQTT_HOST -p $$MQTT_PORT -V 5"
+        if [ -n "$$MQTT_USERNAME" ]; then
+          MQ="$$MQ -u $$MQTT_USERNAME -P $$ROS2_HA_BRIDGE_MQTT_PASSWORD"
+        fi
+        export MQ
+        exec /bin/sh -c "$$*"
+      - mq
+    command:
+      - 'mosquitto_sub $$MQ -v -t "$$TOPIC_PREFIX/#"'
+
+networks:
+  rig:
+    name: ha-ros2-bridge
+    driver: bridge

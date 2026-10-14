@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +27,7 @@ from ros2_ha_bridge.dedupe_store import (
     DedupeStore,
 )
 
+from .conftest import assert_imports_without
 from .fakes import DEFAULT_EPOCH_MS, FakeClock, FakeScheduler
 
 ROBOT = 'arm_left'
@@ -80,9 +80,7 @@ def _warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 def test_module_imports_neither_rclpy_nor_paho() -> None:
-    loaded = {name.split('.')[0] for name in sys.modules}
-    assert 'rclpy' not in loaded
-    assert 'paho' not in loaded
+    assert_imports_without('ros2_ha_bridge.dedupe_store', {'rclpy', 'paho'})
 
 
 def test_constructor_validates_arguments(clock: FakeClock) -> None:

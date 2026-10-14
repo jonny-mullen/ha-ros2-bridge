@@ -5,7 +5,9 @@
 Fixtures: ``clock``, ``scheduler`` and ``broker`` (the fakes), ``secret`` (the
 placeholder secret of the signed golden commands), loaders over
 ``contract/examples`` and ``contract/hmac_vectors.json``, and
-``schema_validator`` over the schemas vendored in ``ros2_ha_bridge/schemas``.
+``schema_validator`` over the schemas vendored in ``ros2_ha_bridge/schemas``,
+and :func:`assert_imports_without`, the import-hygiene check each module's
+test file runs in a fresh interpreter.
 
 Parametrisation: a test that takes a fixture named ``hmac_vector``,
 ``golden_example``, ``valid_<kind>_example`` or ``invalid_<kind>_example`` is
@@ -22,7 +24,9 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable, Iterator
+import subprocess
+import sys
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -33,6 +37,8 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 from referencing import Registry
 from referencing.jsonschema import DRAFT202012
+
+import ros2_ha_bridge
 
 from .fakes import FakeBroker, FakeClock, FakeScheduler
 
@@ -69,6 +75,52 @@ def find_contract_dir() -> Path | None:
 
 
 CONTRACT_DIR = find_contract_dir()
+
+#: Makes ``ros2_ha_bridge`` importable in a fresh interpreter: the package's parent, which is
+#: the source checkout here and the colcon install's site-packages under ``colcon test``.
+PACKAGE_PARENT = Path(ros2_ha_bridge.__file__).resolve().parent.parent
+
+
+def assert_imports_without(
+    module: str, forbidden: Iterable[str], *, expected: Iterable[str] = ()
+) -> None:
+    """Import ``module`` in a fresh interpreter and check what its import graph pulls in.
+
+    Fails when a top-level package named in ``forbidden`` (``rclpy``, ``paho``)
+    is in ``sys.modules`` after the import, or when one named in ``expected``
+    is not. A fresh interpreter is used on purpose: the test process itself
+    may already hold rclpy (under ``colcon test`` in the Jazzy container,
+    where ``pytest.importorskip('rclpy')`` runs at collection) or paho (the
+    link tests), so the process's own ``sys.modules`` says nothing about the
+    module under test.
+    """
+    code = '\n'.join(
+        (
+            'import sys',
+            f'import {module}',
+            "loaded = {name.split('.')[0] for name in sys.modules}",
+            f'forbidden = sorted(loaded & set({sorted(forbidden)!r}))',
+            f'missing = sorted(set({sorted(expected)!r}) - loaded)',
+            "assert not forbidden, 'imported: ' + ', '.join(forbidden)",
+            "assert not missing, 'not imported: ' + ', '.join(missing)",
+        )
+    )
+    env = dict(os.environ)
+    env['PYTHONPATH'] = os.pathsep.join(
+        path for path in (str(PACKAGE_PARENT), env.get('PYTHONPATH', '')) if path
+    )
+    completed = subprocess.run(
+        [sys.executable, '-c', code],
+        check=False,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert completed.returncode == 0, (
+        f'{module} in a fresh interpreter: '
+        f'{completed.stderr.strip() or completed.stdout.strip() or completed.returncode}'
+    )
 
 
 @dataclass(frozen=True)

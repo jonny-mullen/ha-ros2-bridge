@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """ament_python packaging for ros2_ha_bridge."""
 
+from glob import glob
+
 from setuptools import find_packages, setup
 
 package_name = 'ros2_ha_bridge'
@@ -17,6 +19,10 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        # Launch files and the example parameter files, so that
+        # "ros2 launch ros2_ha_bridge bridge.launch.py" works from an install.
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -25,10 +31,13 @@ setup(
     description='ROS 2 side of ha-ros2-bridge: a per-robot MQTT bridge node for Home Assistant.',
     license='Apache-2.0',
     entry_points={
-        # bridge_node.py arrives in phase 2; the entry point is declared now so the
-        # installed layout never changes.
         'console_scripts': [
             'bridge_node = ros2_ha_bridge.bridge_node:main',
+        ],
+        # Executor plugins are found by name in this group (the "executor" parameter);
+        # a dotted "package.module:Class" works without an entry point.
+        'ros2_ha_bridge.executors': [
+            'fake = ros2_ha_bridge.executors.fake:FakeExecutor',
         ],
     },
 )
