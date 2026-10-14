@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/availability.schema.json",
+  "title": "availability",
+  "description": "Topic {prefix}/{robot_id}/availability, ROS to HA, QoS 1, retained, no expiry. This is NOT a JSON payload: the wire bytes are the plain words online or offline with no quotes, no schema field and no object wrapper. 'online' is published on connect; 'offline' is the Last Will and is also published on clean shutdown. Validators wrap the plain bytes as a JSON string before checking them against this schema, which is why the example files contain a quoted string.",
+  "type": "string",
+  "enum": ["online", "offline"]
+}

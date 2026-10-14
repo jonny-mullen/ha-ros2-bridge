@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b",
+  "robot_id": "arm left",
+  "type": "task",
+  "task": "move_to",
+  "accepted": false,
+  "code": "rejected_busy",
+  "reason": "Task 'reset' (id 51f0a2b3-c4d5-4e6f-a7b8-c9d0e1f2a3b4) is running",
+  "received_at": 1760356800962,
+  "clock_skew_ms": 12,
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "ts": 1760356800963
+}

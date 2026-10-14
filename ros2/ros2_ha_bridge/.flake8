@@ -1,0 +1,11 @@
+# Handed to ament_flake8 through --config by test/test_flake8.py (phase 2).
+# Keeps ament's defaults (extend-ignore list, google import order, line length 99) and
+# additionally ignores Q000 (quotes) and I100, I101, I201, I202 (import order), because
+# ruff (quote-style single, line-length 99 for ros2/) owns formatting and import order.
+[flake8]
+extend-ignore = B902,C816,D100,D101,D102,D103,D104,D105,D106,D107,D203,D212,D404,I202,Q000,I100,I101,I201
+import-order-style = google
+max-line-length = 99
+show-source = true
+statistics = true
+exclude = build,install,log,.venv

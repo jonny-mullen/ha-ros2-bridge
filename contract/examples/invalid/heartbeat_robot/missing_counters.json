@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "robot_id": "arm_left",
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc:4123",
+  "seq": 1203,
+  "ts": 1760356804000,
+  "uptime_s": 2406,
+  "ha_clock_offset_ms": 12
+}

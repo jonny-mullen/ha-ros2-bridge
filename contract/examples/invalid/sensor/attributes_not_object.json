@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "entity_id": "binary_sensor.kitchen_motion",
+  "domain": "binary_sensor",
+  "object_id": "kitchen_motion",
+  "state": "on",
+  "available": true,
+  "device_class": "motion",
+  "unit": null,
+  "attributes": [],
+  "last_changed": "2026-10-13T12:00:00.123456+00:00",
+  "ts": 1760356800123
+}

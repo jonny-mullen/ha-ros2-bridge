@@ -1,0 +1,73 @@
+{
+  "schema": 2,
+  "robot_id": "arm_left",
+  "name": "Left arm",
+  "manufacturer": "Example Robotics",
+  "model": "UR3e",
+  "sw_version": "driver 2.4.1",
+  "hw_version": null,
+  "serial_number": null,
+  "suggested_area": "Kitchen",
+  "bridge_version": "0.1.0",
+  "executor": {
+    "name": "fake",
+    "version": "0.1.0"
+  },
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc:4123",
+  "capabilities": {
+    "cancel": true,
+    "feedback": true,
+    "hmac_required": false
+  },
+  "watchdog_mode": "none",
+  "heartbeat_interval_s": 2,
+  "tasks": [
+    {
+      "name": "reset",
+      "label": "Reset to home",
+      "kind": "motion",
+      "timeout_s": 60,
+      "params": null
+    },
+    {
+      "name": "stop",
+      "label": "Stop",
+      "kind": "control",
+      "timeout_s": 5,
+      "params": null
+    },
+    {
+      "name": "pause",
+      "label": "Pause",
+      "kind": "control",
+      "timeout_s": 5,
+      "params": null
+    },
+    {
+      "name": "resume",
+      "label": "Resume",
+      "kind": "control",
+      "timeout_s": 5,
+      "params": null
+    },
+    {
+      "name": "move_to",
+      "label": "Move to named pose",
+      "kind": "motion",
+      "timeout_s": 120,
+      "params": {
+        "type": "object",
+        "properties": {
+          "pose": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "pose"
+        ]
+      }
+    }
+  ],
+  "ts": 1760356800000
+}

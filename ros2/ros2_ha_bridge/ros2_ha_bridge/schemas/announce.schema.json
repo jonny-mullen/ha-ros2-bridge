@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/announce.schema.json",
+  "title": "announce",
+  "description": "Topic {prefix}/{robot_id}/announce, ROS to HA, QoS 1, retained, no expiry. Identity plus the task catalogue. An empty retained payload is a tombstone and is not a JSON document. Republished on connect, on HA birth and on catalogue change. Size limit 64 KiB.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "robot_id": {
+      "$ref": "common.schema.json#/$defs/robot_id"
+    },
+    "name": {
+      "description": "Human-readable robot name shown as the HA device name.",
+      "type": "string",
+      "minLength": 1
+    },
+    "manufacturer": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "model": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "sw_version": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "hw_version": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "serial_number": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "suggested_area": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "bridge_version": {
+      "description": "Version of the ros2_ha_bridge package.",
+      "type": "string",
+      "minLength": 1
+    },
+    "executor": {
+      "description": "Name and version of the loaded executor plugin.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "version"],
+      "additionalProperties": true
+    },
+    "session": {
+      "$ref": "common.schema.json#/$defs/session"
+    },
+    "instance": {
+      "$ref": "common.schema.json#/$defs/instance"
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "cancel": {
+          "type": "boolean"
+        },
+        "feedback": {
+          "type": "boolean"
+        },
+        "hmac_required": {
+          "description": "True when the node has a shared secret configured and rejects unsigned commands.",
+          "type": "boolean"
+        }
+      },
+      "required": ["cancel", "feedback", "hmac_required"],
+      "additionalProperties": true
+    },
+    "watchdog_mode": {
+      "$ref": "common.schema.json#/$defs/watchdog_mode"
+    },
+    "heartbeat_interval_s": {
+      "description": "Interval of the robot heartbeat in seconds. 0 means the node sends no heartbeat and HA does no staleness tracking.",
+      "type": "number",
+      "minimum": 0
+    },
+    "tasks": {
+      "description": "The task catalogue after the operator's tasks.allow intersection. A task with no required params gets a button in HA; every task is callable through send_task.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/task_spec"
+      }
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    }
+  },
+  "required": [
+    "schema",
+    "robot_id",
+    "name",
+    "bridge_version",
+    "session",
+    "instance",
+    "capabilities",
+    "watchdog_mode",
+    "heartbeat_interval_s",
+    "tasks",
+    "ts"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "task_spec": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "$ref": "common.schema.json#/$defs/task_name"
+        },
+        "label": {
+          "description": "Human-readable label used for buttons and speech.",
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "$ref": "common.schema.json#/$defs/task_kind"
+        },
+        "timeout_s": {
+          "description": "Default task timeout in seconds; a command may override it within the node's cap.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "params": {
+          "description": "null when the task takes no parameters, otherwise a params_subset schema.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/params_subset"
+            }
+          ]
+        },
+        "description": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "label", "kind", "timeout_s", "params"],
+      "additionalProperties": true
+    }
+  }
+}

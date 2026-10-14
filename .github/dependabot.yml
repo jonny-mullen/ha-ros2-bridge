@@ -1,0 +1,16 @@
+# Monthly dependency bumps. The pytest-homeassistant-custom-component bump in
+# requirements_test.txt is the trip-wire for Home Assistant monthly releases.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+  - package-ecosystem: pip
+    directory: /ros2/ros2_ha_bridge
+    schedule:
+      interval: monthly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

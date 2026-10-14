@@ -1,0 +1,48 @@
+# Run "pre-commit install" once in the development environment. Every hook here is also
+# enforced in CI (.github/workflows). The local hooks use the active environment, which
+# must have requirements_test.txt installed so that mypy can resolve homeassistant.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.0
+    hooks:
+      - id: ruff-check
+      - id: ruff-format
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        args:
+          - --strict
+          - -d
+          - "{extends: default, rules: {line-length: {max: 120}, truthy: {check-keys: false}, document-start: disable}}"
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        # British English: only the misspelling dictionaries. en-GB_to_en-US is never enabled.
+        # Skips and the ignore list are in [tool.codespell] in pyproject.toml.
+        args: ["--builtin", "clear,rare"]
+        additional_dependencies: [tomli]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy (strict, files from pyproject.toml)
+        entry: mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: check-spdx
+        name: SPDX header on every .py and .sh file
+        entry: python scripts/check_spdx.py
+        language: system
+        types_or: [python, shell]
+        pass_filenames: false
+      - id: check-versions
+        name: version strings agree across the repository
+        entry: python scripts/check_versions.py
+        language: system
+        files: ^(custom_components/ros2_bridge/(manifest\.json|const\.py)|ros2/ros2_ha_bridge/(package\.xml|setup\.py|ros2_ha_bridge/__init__\.py)|CHANGELOG\.md)$
+        pass_filenames: false

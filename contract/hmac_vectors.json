@@ -1,0 +1,224 @@
+{
+  "description": "Test vectors for the optional command signature. Both halves must reproduce every sig exactly. Secrets here are placeholders for tests only.",
+  "algorithm": "HMAC-SHA256",
+  "definition": {
+    "canonical": "json.dumps(payload_without_sig, sort_keys=True, separators=(\",\", \":\"), ensure_ascii=False).encode(\"utf-8\")",
+    "message": "topic.encode(\"utf-8\") + b\"\\n\" + canonical",
+    "sig": "hmac.new(secret.encode(\"utf-8\"), message, hashlib.sha256).hexdigest()",
+    "compare": "constant-time comparison of the lower-case hex strings"
+  },
+  "vectors": [
+    {
+      "name": "task_command",
+      "description": "The design's move_to task command on the default prefix.",
+      "secret": "example-shared-secret-change-me",
+      "topic": "ros2_bridge/arm_left/cmd",
+      "payload": {
+        "schema": 1,
+        "id": "6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b",
+        "type": "task",
+        "robot_id": "arm_left",
+        "task": "move_to",
+        "params": {
+          "pose": "home"
+        },
+        "issued_at": 1760356800950,
+        "max_age_ms": 5000,
+        "timeout_s": null,
+        "source": {
+          "origin": "ha",
+          "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+          "kind": "intent",
+          "user_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+          "context_id": "01J9ZX3M5Q7R9T1V3X5Z7B9D1F",
+          "device_id": "voice_pe_kitchen_device_id"
+        }
+      },
+      "canonical": "{\"id\":\"6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b\",\"issued_at\":1760356800950,\"max_age_ms\":5000,\"params\":{\"pose\":\"home\"},\"robot_id\":\"arm_left\",\"schema\":1,\"source\":{\"context_id\":\"01J9ZX3M5Q7R9T1V3X5Z7B9D1F\",\"device_id\":\"voice_pe_kitchen_device_id\",\"instance_id\":\"c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"kind\":\"intent\",\"origin\":\"ha\",\"user_id\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\"},\"task\":\"move_to\",\"timeout_s\":null,\"type\":\"task\"}",
+      "sig": "fdc78ea0db98e8e0abdc424c76f28a2f1840a1ffe4a97c9c9bbceab7e18e61c1"
+    },
+    {
+      "name": "cancel_command",
+      "description": "A cancel command naming a specific target id.",
+      "secret": "example-shared-secret-change-me",
+      "topic": "ros2_bridge/arm_left/cmd",
+      "payload": {
+        "schema": 1,
+        "id": "0c1d4e6f-2a3b-4c5d-8e9f-0a1b2c3d4e5f",
+        "type": "cancel",
+        "robot_id": "arm_left",
+        "target_id": "7b3e9d21-5f6a-4c8b-9e0d-1f2a3b4c5d6e",
+        "issued_at": 1760356812000,
+        "max_age_ms": 5000,
+        "source": {
+          "origin": "ha",
+          "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+          "kind": "button",
+          "user_id": null,
+          "context_id": "01J9ZY4N6R8S0U2W4Y6A8C0E2G",
+          "device_id": null
+        }
+      },
+      "canonical": "{\"id\":\"0c1d4e6f-2a3b-4c5d-8e9f-0a1b2c3d4e5f\",\"issued_at\":1760356812000,\"max_age_ms\":5000,\"robot_id\":\"arm_left\",\"schema\":1,\"source\":{\"context_id\":\"01J9ZY4N6R8S0U2W4Y6A8C0E2G\",\"device_id\":null,\"instance_id\":\"c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"kind\":\"button\",\"origin\":\"ha\",\"user_id\":null},\"target_id\":\"7b3e9d21-5f6a-4c8b-9e0d-1f2a3b4c5d6e\",\"type\":\"cancel\"}",
+      "sig": "a6c289d979b2eefc1e75ebcaa87e5989310e55dd5b594c2aa3b66f72d79a3f6b"
+    },
+    {
+      "name": "non_ascii_string",
+      "description": "Non-ASCII characters in params; ensure_ascii is false so they are signed as UTF-8 bytes, not as \\u escapes.",
+      "secret": "example-shared-secret-change-me",
+      "topic": "ros2_bridge/arm_right/cmd",
+      "payload": {
+        "schema": 1,
+        "id": "8c1f2e3d-4a5b-4c6d-8e7f-9a0b1c2d3e4f",
+        "type": "task",
+        "robot_id": "arm_right",
+        "task": "move_to",
+        "params": {
+          "pose": "Küche",
+          "note": "厨房 naïve façade"
+        },
+        "issued_at": 1760356820000,
+        "max_age_ms": 5000,
+        "timeout_s": 30,
+        "source": {
+          "origin": "ha",
+          "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+          "kind": "service",
+          "user_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+          "context_id": "01J9ZX3M5Q7R9T1V3X5Z7B9D1F",
+          "device_id": null
+        }
+      },
+      "canonical": "{\"id\":\"8c1f2e3d-4a5b-4c6d-8e7f-9a0b1c2d3e4f\",\"issued_at\":1760356820000,\"max_age_ms\":5000,\"params\":{\"note\":\"厨房 naïve façade\",\"pose\":\"Küche\"},\"robot_id\":\"arm_right\",\"schema\":1,\"source\":{\"context_id\":\"01J9ZX3M5Q7R9T1V3X5Z7B9D1F\",\"device_id\":null,\"instance_id\":\"c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"kind\":\"service\",\"origin\":\"ha\",\"user_id\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\"},\"task\":\"move_to\",\"timeout_s\":30,\"type\":\"task\"}",
+      "sig": "7e742e0e3a737a3f32e7475332c94987fc200067d72d4593d7daf0a448000ada"
+    },
+    {
+      "name": "nested_params",
+      "description": "Nested params with keys given out of order, a float, a bool, a list and a null; sort_keys applies at every level and list order is kept. Schema-valid as a command; the node would still refuse it at runtime as rejected_invalid_params because announced params are flat.",
+      "secret": "example-shared-secret-change-me",
+      "topic": "lab/arm_left/cmd",
+      "payload": {
+        "schema": 1,
+        "id": "d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f7a",
+        "type": "task",
+        "robot_id": "arm_left",
+        "task": "grip",
+        "params": {
+          "zeta": 1,
+          "pose": "home",
+          "options": {
+            "speed": 0.5,
+            "retries": 2,
+            "careful": true,
+            "tags": [
+              "b",
+              "a"
+            ],
+            "limit": null
+          },
+          "alpha": "x"
+        },
+        "issued_at": 1760356830000,
+        "max_age_ms": 10000,
+        "timeout_s": 45.5,
+        "source": {
+          "origin": "ha",
+          "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+          "kind": "automation",
+          "user_id": null,
+          "context_id": "01J9ZY4N6R8S0U2W4Y6A8C0E2G",
+          "device_id": null
+        }
+      },
+      "canonical": "{\"id\":\"d4e5f6a7-b8c9-4d0e-9f1a-2b3c4d5e6f7a\",\"issued_at\":1760356830000,\"max_age_ms\":10000,\"params\":{\"alpha\":\"x\",\"options\":{\"careful\":true,\"limit\":null,\"retries\":2,\"speed\":0.5,\"tags\":[\"b\",\"a\"]},\"pose\":\"home\",\"zeta\":1},\"robot_id\":\"arm_left\",\"schema\":1,\"source\":{\"context_id\":\"01J9ZY4N6R8S0U2W4Y6A8C0E2G\",\"device_id\":null,\"instance_id\":\"c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"kind\":\"automation\",\"origin\":\"ha\",\"user_id\":null},\"task\":\"grip\",\"timeout_s\":45.5,\"type\":\"task\"}",
+      "sig": "b7c8e3223a4f065b1e0bbbab57c4eef2a23132276f58d4dc04af02900ad8a9dd"
+    },
+    {
+      "name": "same_payload_other_topic",
+      "description": "The task_command payload signed for a different prefix; the signature must change because the topic is part of the signed message.",
+      "secret": "example-shared-secret-change-me",
+      "topic": "lab/arm_left/cmd",
+      "payload": {
+        "schema": 1,
+        "id": "6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b",
+        "type": "task",
+        "robot_id": "arm_left",
+        "task": "move_to",
+        "params": {
+          "pose": "home"
+        },
+        "issued_at": 1760356800950,
+        "max_age_ms": 5000,
+        "timeout_s": null,
+        "source": {
+          "origin": "ha",
+          "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+          "kind": "intent",
+          "user_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+          "context_id": "01J9ZX3M5Q7R9T1V3X5Z7B9D1F",
+          "device_id": "voice_pe_kitchen_device_id"
+        }
+      },
+      "canonical": "{\"id\":\"6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b\",\"issued_at\":1760356800950,\"max_age_ms\":5000,\"params\":{\"pose\":\"home\"},\"robot_id\":\"arm_left\",\"schema\":1,\"source\":{\"context_id\":\"01J9ZX3M5Q7R9T1V3X5Z7B9D1F\",\"device_id\":\"voice_pe_kitchen_device_id\",\"instance_id\":\"c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"kind\":\"intent\",\"origin\":\"ha\",\"user_id\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\"},\"task\":\"move_to\",\"timeout_s\":null,\"type\":\"task\"}",
+      "sig": "7be01a2797cd053839809191e65c38f8d8693b9fe73046b71f4f558e21d771ab"
+    },
+    {
+      "name": "other_secret",
+      "description": "The task_command payload and topic with a different secret.",
+      "secret": "another-example-secret",
+      "topic": "ros2_bridge/arm_left/cmd",
+      "payload": {
+        "schema": 1,
+        "id": "6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b",
+        "type": "task",
+        "robot_id": "arm_left",
+        "task": "move_to",
+        "params": {
+          "pose": "home"
+        },
+        "issued_at": 1760356800950,
+        "max_age_ms": 5000,
+        "timeout_s": null,
+        "source": {
+          "origin": "ha",
+          "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+          "kind": "intent",
+          "user_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+          "context_id": "01J9ZX3M5Q7R9T1V3X5Z7B9D1F",
+          "device_id": "voice_pe_kitchen_device_id"
+        }
+      },
+      "canonical": "{\"id\":\"6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b\",\"issued_at\":1760356800950,\"max_age_ms\":5000,\"params\":{\"pose\":\"home\"},\"robot_id\":\"arm_left\",\"schema\":1,\"source\":{\"context_id\":\"01J9ZX3M5Q7R9T1V3X5Z7B9D1F\",\"device_id\":\"voice_pe_kitchen_device_id\",\"instance_id\":\"c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"kind\":\"intent\",\"origin\":\"ha\",\"user_id\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\"},\"task\":\"move_to\",\"timeout_s\":null,\"type\":\"task\"}",
+      "sig": "35e160bba87e2dfa7ba7d65c014ae60d23f7cfb456ee2fec67909e5a606f6c9d"
+    },
+    {
+      "name": "doc_example",
+      "description": "The signed task example printed in docs/mqtt-contract.md, so that page can be checked against this file. It uses the page's placeholder secret and the page's 2026 epoch; the other vectors use the 2025 epoch of the golden examples.",
+      "secret": "example-shared-secret",
+      "topic": "ros2_bridge/arm_left/cmd",
+      "payload": {
+        "schema": 1,
+        "id": "6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b",
+        "type": "task",
+        "robot_id": "arm_left",
+        "task": "move_to",
+        "params": {
+          "pose": "home"
+        },
+        "issued_at": 1791892800950,
+        "max_age_ms": 5000,
+        "timeout_s": null,
+        "source": {
+          "origin": "ha",
+          "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+          "kind": "intent",
+          "user_id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+          "context_id": "01J9ZX4K7M2N8P3Q5R6S7T8V9W",
+          "device_id": "3f9a1c2e4b5d6f708192a3b4c5d6e7f8"
+        }
+      },
+      "canonical": "{\"id\":\"6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b\",\"issued_at\":1791892800950,\"max_age_ms\":5000,\"params\":{\"pose\":\"home\"},\"robot_id\":\"arm_left\",\"schema\":1,\"source\":{\"context_id\":\"01J9ZX4K7M2N8P3Q5R6S7T8V9W\",\"device_id\":\"3f9a1c2e4b5d6f708192a3b4c5d6e7f8\",\"instance_id\":\"c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e\",\"kind\":\"intent\",\"origin\":\"ha\",\"user_id\":\"a1b2c3d4e5f60718293a4b5c6d7e8f90\"},\"task\":\"move_to\",\"timeout_s\":null,\"type\":\"task\"}",
+      "sig": "84c9b26aa7afe51eb312ae6ed7d254f76876e49376a406f783169d14709184ab"
+    }
+  ]
+}

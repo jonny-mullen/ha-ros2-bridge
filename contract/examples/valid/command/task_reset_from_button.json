@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "id": "51f0a2b3-c4d5-4e6f-a7b8-c9d0e1f2a3b4",
+  "type": "task",
+  "robot_id": "arm_left",
+  "task": "reset",
+  "params": {},
+  "issued_at": 1760356800100,
+  "max_age_ms": 5000,
+  "source": {
+    "origin": "ha",
+    "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e",
+    "kind": "button",
+    "user_id": null,
+    "context_id": "01J9ZY4N6R8S0U2W4Y6A8C0E2G",
+    "device_id": null
+  }
+}

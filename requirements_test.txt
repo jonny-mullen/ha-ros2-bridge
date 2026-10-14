@@ -1,0 +1,11 @@
+# Test and lint requirements for the Home Assistant half (CI: .github/workflows/ha.yml).
+# pytest-homeassistant-custom-component 0.13.372 is the build that pins homeassistant==2026.10.1
+# (checked on PyPI, 2026-10-13). It brings pytest, pytest-asyncio, pytest-cov, syrupy and the
+# rest of Home Assistant's own test harness; syrupy and pytest-cov are listed unpinned so they
+# follow the harness's pins rather than fight them.
+pytest-homeassistant-custom-component==0.13.372
+syrupy
+pytest-cov
+jsonschema==4.26.0
+ruff==0.17.0
+mypy==2.4.0

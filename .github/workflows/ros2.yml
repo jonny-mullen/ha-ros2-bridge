@@ -1,0 +1,81 @@
+name: ROS 2 package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  core-tests:
+    name: rclpy-free core tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          # ROS 2 Jazzy runs Python 3.12.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: ros2/ros2_ha_bridge/requirements.txt
+      - name: Install test requirements
+        run: python -m pip install pytest jsonschema -r ros2/ros2_ha_bridge/requirements.txt
+      - name: pytest (modules that need rclpy are deselected)
+        run: |
+          set +e
+          python -m pytest ros2/ros2_ha_bridge/test -k "not node"
+          rc=$?
+          set -e
+          if [ "$rc" -eq 5 ]; then
+            echo "No rclpy-free tests collected yet (phase 1 adds them); nothing to fail."
+            exit 0
+          fi
+          exit "$rc"
+
+  colcon:
+    name: colcon build and test (Jazzy)
+    runs-on: ubuntu-latest
+    container:
+      image: ros:jazzy-ros-base
+    defaults:
+      run:
+        shell: bash
+    env:
+      ROS_DISTRO: jazzy
+      # Ubuntu 24.04 marks the system Python as externally managed (PEP 668); the
+      # container is disposable, so pip is allowed to install paho-mqtt into it.
+      PIP_BREAK_SYSTEM_PACKAGES: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install ROS dependencies with rosdep
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends python3-pip
+          rosdep update --rosdistro "$ROS_DISTRO"
+          rosdep install --from-paths ros2 --ignore-src -y --rosdistro "$ROS_DISTRO"
+      - name: Install pip requirements (paho-mqtt from pip, apt ships 1.6.1)
+        run: python3 -m pip install -r ros2/ros2_ha_bridge/requirements.txt
+      - name: colcon build
+        working-directory: ros2
+        run: |
+          source "/opt/ros/$ROS_DISTRO/setup.bash"
+          colcon build --event-handlers console_direct+
+      - name: colcon test
+        working-directory: ros2
+        run: |
+          source "/opt/ros/$ROS_DISTRO/setup.bash"
+          colcon test --event-handlers console_direct+
+          colcon test-result --verbose
+
+  spdx:
+    name: SPDX headers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python scripts/check_spdx.py

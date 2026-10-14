@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "robot_id": "arm_left",
+  "state": "error",
+  "task_id": null,
+  "task": null,
+  "since": 1760356870000,
+  "paused": false,
+  "inhibited": true,
+  "ha_link": "down",
+  "watchdog_mode": "inhibit_new",
+  "executor_health": {
+    "level": "degraded",
+    "message": "start() took 0.35 s"
+  },
+  "error": {
+    "code": "timeout",
+    "reason": "Task 'hang' did not finish within 10 s and ignored cancel"
+  },
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc:4123",
+  "seq": 44,
+  "ts": 1760356870002
+}

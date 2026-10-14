@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/state.schema.json",
+  "title": "state",
+  "description": "Topic {prefix}/{robot_id}/state, ROS to HA, QoS 1, retained, no expiry. Published on change and on (re)connect. state is exactly idle, busy or error; paused, inhibited and ha_link are separate fields. seq increments per publication within a session and HA drops a regressing seq within the same session.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "robot_id": {
+      "$ref": "common.schema.json#/$defs/robot_id"
+    },
+    "state": {
+      "enum": ["idle", "busy", "error"]
+    },
+    "task_id": {
+      "description": "Id of the active task, or null when idle.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/task_id"
+        }
+      ]
+    },
+    "task": {
+      "description": "Name of the active task, or null when idle.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/task_name"
+        }
+      ]
+    },
+    "since": {
+      "description": "When the current state value began.",
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    },
+    "paused": {
+      "description": "True while the active task is paused. HA suspends its result deadline for that task while this is true.",
+      "type": "boolean"
+    },
+    "inhibited": {
+      "description": "True while the watchdog refuses new motion.",
+      "type": "boolean"
+    },
+    "ha_link": {
+      "$ref": "common.schema.json#/$defs/ha_link"
+    },
+    "watchdog_mode": {
+      "$ref": "common.schema.json#/$defs/watchdog_mode"
+    },
+    "executor_health": {
+      "$ref": "common.schema.json#/$defs/executor_health"
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/error"
+        }
+      ]
+    },
+    "session": {
+      "$ref": "common.schema.json#/$defs/session"
+    },
+    "instance": {
+      "$ref": "common.schema.json#/$defs/instance"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/$defs/counter"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    }
+  },
+  "required": [
+    "schema",
+    "robot_id",
+    "state",
+    "task_id",
+    "task",
+    "since",
+    "paused",
+    "inhibited",
+    "ha_link",
+    "watchdog_mode",
+    "executor_health",
+    "error",
+    "session",
+    "instance",
+    "seq",
+    "ts"
+  ],
+  "additionalProperties": true
+}

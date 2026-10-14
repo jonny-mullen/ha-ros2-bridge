@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/result.schema.json",
+  "title": "result",
+  "description": "Topic {prefix}/{robot_id}/task/{task_id}/result, ROS to HA, QoS 1, retained, message expiry reply.result_expiry_s (default 300). Exactly one per accepted task command; cancel commands have no result. status maps onto action_msgs/GoalStatus (succeeded 4, cancelled 5, aborted 6) and goal_status must agree with it. kind repeats the task kind so HA routes control and query results away from last_result.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/task_id"
+    },
+    "robot_id": {
+      "$ref": "common.schema.json#/$defs/robot_id"
+    },
+    "task": {
+      "$ref": "common.schema.json#/$defs/task_name"
+    },
+    "kind": {
+      "$ref": "common.schema.json#/$defs/task_kind"
+    },
+    "status": {
+      "$ref": "common.schema.json#/$defs/result_status"
+    },
+    "goal_status": {
+      "description": "action_msgs/GoalStatus value matching status.",
+      "enum": [4, 5, 6]
+    },
+    "code": {
+      "$ref": "common.schema.json#/$defs/result_code"
+    },
+    "reason": {
+      "description": "Human-readable explanation suitable for speech, may be empty.",
+      "type": "string"
+    },
+    "data": {
+      "description": "Executor-specific detail, for example the raw MoveIt error code. An empty object when there is none.",
+      "type": "object"
+    },
+    "started_at": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    },
+    "finished_at": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    },
+    "session": {
+      "$ref": "common.schema.json#/$defs/session"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "robot_id",
+    "task",
+    "kind",
+    "status",
+    "goal_status",
+    "code",
+    "reason",
+    "data",
+    "started_at",
+    "finished_at",
+    "session",
+    "ts"
+  ],
+  "additionalProperties": true,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "succeeded"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "goal_status": {
+            "const": 4
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "cancelled"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "goal_status": {
+            "const": 5
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "aborted"
+          }
+        },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "goal_status": {
+            "const": 6
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2_ha_bridge</name>
+  <version>0.1.0</version>
+  <description>
+    ROS 2 side of ha-ros2-bridge: one node per robot that announces the robot to Home
+    Assistant over MQTT, authorises and runs tasks through a TaskExecutor plugin, and
+    publishes state, availability, heartbeat, acks and results.
+  </description>
+  <maintainer email="TODO-maintainer@example.com">TODO maintainer name</maintainer>
+  <license>Apache-2.0</license>
+  <url type="repository">https://github.com/TODO-owner/ha-ros2-bridge</url>
+  <url type="bugtracker">https://github.com/TODO-owner/ha-ros2-bridge/issues</url>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>action_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <!-- paho-mqtt 2.1.0 comes from pip (requirements.txt); Ubuntu 24.04 apt ships 1.6.1. -->
+
+  <!-- ament_copyright is not used: it cannot read SPDX headers; scripts/check_spdx.py is the gate. -->
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

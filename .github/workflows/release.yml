@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GitHub release from the CHANGELOG
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Every version string matches the tag and CHANGELOG.md has its section
+        run: python scripts/check_versions.py --expect "${GITHUB_REF_NAME#v}" --released
+      - name: Extract this version's CHANGELOG section
+        run: python scripts/check_versions.py --changelog-section "${GITHUB_REF_NAME#v}" > release_notes.md
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME"
+          --verify-tag
+          --title "$GITHUB_REF_NAME"
+          --notes-file release_notes.md

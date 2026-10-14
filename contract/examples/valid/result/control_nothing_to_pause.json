@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "4e6a8c0f-1b3d-4d5f-9a7c-8e0f2a4b6c8d",
+  "robot_id": "arm_left",
+  "task": "pause",
+  "kind": "control",
+  "status": "aborted",
+  "goal_status": 6,
+  "code": "nothing_to_pause",
+  "reason": "No task is running",
+  "data": {},
+  "started_at": 1760356850000,
+  "finished_at": 1760356850001,
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "ts": 1760356850002
+}

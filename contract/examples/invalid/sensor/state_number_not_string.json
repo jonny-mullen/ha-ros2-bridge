@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "entity_id": "sensor.kitchen_temperature",
+  "domain": "sensor",
+  "object_id": "kitchen_temperature",
+  "state": 21.5,
+  "available": true,
+  "device_class": "temperature",
+  "unit": "°C",
+  "attributes": {
+    "friendly_name": "Kitchen temperature"
+  },
+  "last_changed": "2026-10-13T11:58:30+00:00",
+  "ts": 1760356890000
+}

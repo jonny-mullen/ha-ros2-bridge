@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "entity_id": "light.kitchen_ceiling",
+  "domain": "light",
+  "object_id": "kitchen_ceiling",
+  "state": "off",
+  "available": true,
+  "device_class": null,
+  "unit": null,
+  "attributes": {},
+  "last_changed": null,
+  "ts": 1760357100000
+}

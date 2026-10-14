@@ -147,7 +147,7 @@
       "https://community.rti.com/node/6443 (accessed 2026-10-13)",
       "https://pypi.org/project/WSL-Port-Forwarding (community project; accessed 2026-10-13)",
       "Local read-only check of the Windows PC via Get-CimInstance and WSL state, 2026-10-13 (TITAN X Pascal, driver 576.52, Windows 10 Pro 19045, WSL 3.0.1.0 NAT mode, Docker Desktop 4.41.1)",
-      "Local read-only check of C:\\Users\\jonat\\ROS and HA, 2026-10-13: no files matching *.md, *.py, *.yaml, *.yml or *.json, so no bridge result-code definition exists yet"
+      "Local read-only check of <repo root>, 2026-10-13: no files matching *.md, *.py, *.yaml, *.yml or *.json, so no bridge result-code definition exists yet"
     ]
   },
   "workflowProgress": [

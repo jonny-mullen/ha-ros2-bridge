@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "robot_id": "arm_right",
+  "name": "Right arm",
+  "bridge_version": "0.1.0",
+  "session": "3e7a1c9b-5d2f-4b8e-a1c3-6f0d2e4a8b7c",
+  "instance": "robotpc:4124",
+  "capabilities": {
+    "cancel": false,
+    "feedback": false,
+    "hmac_required": true
+  },
+  "watchdog_mode": "none",
+  "heartbeat_interval_s": 2,
+  "tasks": [
+    {
+      "name": "reset",
+      "label": "Reset to home",
+      "kind": "motion",
+      "timeout_s": 60,
+      "params": null
+    }
+  ],
+  "ts": 1760356800000
+}

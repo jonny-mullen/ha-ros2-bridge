@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "e5f6a7b8-c9d0-4e1f-8a2b-3c4d5e6f7a8b",
+  "robot_id": "arm_left",
+  "type": "task",
+  "task": null,
+  "accepted": false,
+  "code": "rejected_malformed",
+  "reason": "issued_at is missing",
+  "received_at": 1760356840000,
+  "clock_skew_ms": null,
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "ts": 1760356840001
+}

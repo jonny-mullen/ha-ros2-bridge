@@ -1,0 +1,3 @@
+# Installed with pip inside the ROS 2 environment. Ubuntu 24.04 apt ships paho-mqtt 1.6.1,
+# which lacks the MQTT 5 subscribe options and the VERSION2 callback API the node uses.
+paho-mqtt==2.1.0

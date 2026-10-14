@@ -1,0 +1,28 @@
+name: Contract
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: schemas, examples, vendored copies and versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install validator requirements
+        run: python -m pip install jsonschema pyyaml
+      - name: Schemas compile and every example passes or fails as its folder says
+        run: python scripts/validate_contract.py
+      - name: Vendored schemas are byte-identical to contract/schemas
+        run: python scripts/sync_contract.py --check
+      - name: Version strings agree
+        run: python scripts/check_versions.py

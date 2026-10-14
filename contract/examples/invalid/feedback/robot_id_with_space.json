@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "id": "6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b",
+  "robot_id": "arm left",
+  "progress": 0.4,
+  "stage": "executing",
+  "message": "waypoint 2 of 5",
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "ts": 1760356802100
+}

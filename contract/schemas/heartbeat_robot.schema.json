@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/heartbeat_robot.schema.json",
+  "title": "heartbeat (ROS to HA)",
+  "description": "Topic {prefix}/{robot_id}/heartbeat, ROS to HA, QoS 0, not retained, message expiry 5 s. Published every heartbeat.interval_s (default 2; 0 disables). Carries the node's counters and its measured clock offset against the HA heartbeat.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "robot_id": {
+      "$ref": "common.schema.json#/$defs/robot_id"
+    },
+    "session": {
+      "$ref": "common.schema.json#/$defs/session"
+    },
+    "instance": {
+      "$ref": "common.schema.json#/$defs/instance"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/$defs/counter"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    },
+    "uptime_s": {
+      "description": "Seconds since the node process started.",
+      "type": "number",
+      "minimum": 0
+    },
+    "ha_clock_offset_ms": {
+      "description": "Last measured (node clock minus HA clock) in milliseconds from the HA heartbeat ts, or null before any HA heartbeat has been seen.",
+      "type": ["integer", "null"]
+    },
+    "counters": {
+      "$ref": "#/$defs/counters"
+    }
+  },
+  "required": [
+    "schema",
+    "robot_id",
+    "session",
+    "instance",
+    "seq",
+    "ts",
+    "uptime_s",
+    "counters"
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "counters": {
+      "description": "Lifetime counters of the node process. New counters may be added as optional fields; every value is a non-negative integer.",
+      "type": "object",
+      "properties": {
+        "accepted": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "rejected": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "duplicates": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "dropped_retained": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "dropped_oversize": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "dropped_invalid_id": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "dropped_queue_full": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "publish_errors": {
+          "$ref": "common.schema.json#/$defs/counter"
+        },
+        "takeovers": {
+          "$ref": "common.schema.json#/$defs/counter"
+        }
+      },
+      "required": [
+        "accepted",
+        "rejected",
+        "duplicates",
+        "dropped_retained",
+        "dropped_oversize",
+        "dropped_invalid_id",
+        "dropped_queue_full",
+        "publish_errors",
+        "takeovers"
+      ],
+      "additionalProperties": true
+    }
+  }
+}

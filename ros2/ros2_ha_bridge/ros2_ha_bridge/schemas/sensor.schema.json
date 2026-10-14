@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/sensor.schema.json",
+  "title": "sensor (canonical path)",
+  "description": "Topic {prefix}/ha/sensors/{domain}/{object_id}, HA to ROS, QoS 0, retained, no expiry. Canonical republish of the entities listed in mirror_entities, published on every state change and once at setup. HA states unavailable and unknown become state null with available false. attributes is filtered to the documented allowlist. Cleared with an empty retained publish when the entity leaves the option, when the prefix changes and on entry removal.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "entity_id": {
+      "description": "The HA entity id, domain.object_id.",
+      "type": "string",
+      "pattern": "^[a-z0-9_]+\\.[a-z0-9_]+$"
+    },
+    "domain": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "object_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$"
+    },
+    "state": {
+      "description": "The HA state string, or null when the entity is unavailable or unknown.",
+      "type": ["string", "null"]
+    },
+    "available": {
+      "type": "boolean"
+    },
+    "device_class": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "unit": {
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "attributes": {
+      "type": "object"
+    },
+    "last_changed": {
+      "description": "HA's last_changed as an ISO 8601 string with offset, or null.",
+      "$ref": "common.schema.json#/$defs/nullable_string"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    }
+  },
+  "required": [
+    "schema",
+    "entity_id",
+    "domain",
+    "object_id",
+    "state",
+    "available",
+    "device_class",
+    "unit",
+    "attributes",
+    "last_changed",
+    "ts"
+  ],
+  "additionalProperties": true
+}

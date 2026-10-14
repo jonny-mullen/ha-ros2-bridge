@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "id": "6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b",
+  "type": "task",
+  "robot_id": "arm_left",
+  "task": "move_to",
+  "params": {
+    "pose": "home"
+  },
+  "issued_at": 1760356800950,
+  "max_age_ms": 5000,
+  "timeout_s": null
+}

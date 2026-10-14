@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/feedback.schema.json",
+  "title": "feedback",
+  "description": "Topic {prefix}/{robot_id}/task/{task_id}/feedback, ROS to HA, QoS 0, not retained, message expiry 10 s. Optional progress report for a running task, throttled on the node to reply.feedback_max_rate_hz (default 2).",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/task_id"
+    },
+    "robot_id": {
+      "$ref": "common.schema.json#/$defs/robot_id"
+    },
+    "progress": {
+      "description": "Fraction complete from 0 to 1, or null when the executor cannot estimate it.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      ]
+    },
+    "stage": {
+      "description": "Short machine-friendly stage name, may be empty.",
+      "type": "string"
+    },
+    "message": {
+      "description": "Human-readable progress text, may be empty.",
+      "type": "string"
+    },
+    "session": {
+      "$ref": "common.schema.json#/$defs/session"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    }
+  },
+  "required": ["schema", "id", "robot_id", "progress", "stage", "message", "session", "ts"],
+  "additionalProperties": true
+}

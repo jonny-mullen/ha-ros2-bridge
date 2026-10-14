@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/ack.schema.json",
+  "title": "ack",
+  "description": "Topic {prefix}/{robot_id}/task/{task_id}/ack, ROS to HA, QoS 1, retained, message expiry reply.ack_expiry_s (default 120). One distinct ack per command id; a repeated id republishes the stored ack bytes. accepted is true exactly when code is 'accepted'. For type cancel, an accepted ack is the terminal outcome of that command id. A command whose id is not a UUID gets no ack at all.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "id": {
+      "$ref": "common.schema.json#/$defs/task_id"
+    },
+    "robot_id": {
+      "$ref": "common.schema.json#/$defs/robot_id"
+    },
+    "type": {
+      "description": "The type of the command being acknowledged.",
+      "enum": ["task", "cancel"]
+    },
+    "task": {
+      "description": "The task named by the command, or null for a cancel or when the command was too malformed to tell.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "common.schema.json#/$defs/task_name"
+        }
+      ]
+    },
+    "accepted": {
+      "type": "boolean"
+    },
+    "code": {
+      "$ref": "common.schema.json#/$defs/ack_code"
+    },
+    "reason": {
+      "description": "Human-readable explanation, empty when accepted.",
+      "type": "string"
+    },
+    "received_at": {
+      "description": "Node clock when the command arrived.",
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    },
+    "clock_skew_ms": {
+      "description": "received_at minus the command's issued_at, or null when issued_at could not be read.",
+      "type": ["integer", "null"]
+    },
+    "session": {
+      "$ref": "common.schema.json#/$defs/session"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    }
+  },
+  "required": [
+    "schema",
+    "id",
+    "robot_id",
+    "type",
+    "task",
+    "accepted",
+    "code",
+    "reason",
+    "received_at",
+    "clock_skew_ms",
+    "session",
+    "ts"
+  ],
+  "additionalProperties": true,
+  "if": {
+    "properties": {
+      "accepted": {
+        "const": true
+      }
+    },
+    "required": ["accepted"]
+  },
+  "then": {
+    "properties": {
+      "code": {
+        "const": "accepted"
+      }
+    }
+  },
+  "else": {
+    "properties": {
+      "code": {
+        "not": {
+          "const": "accepted"
+        }
+      }
+    }
+  }
+}

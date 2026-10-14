@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "robot_id": "arm_left",
+  "state": "busy",
+  "task_id": "task-42",
+  "task": "move_to",
+  "since": 1760356801000,
+  "paused": false,
+  "inhibited": false,
+  "ha_link": "up",
+  "watchdog_mode": "none",
+  "executor_health": {
+    "level": "ok",
+    "message": ""
+  },
+  "error": null,
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc:4123",
+  "seq": 42,
+  "ts": 1760356801003
+}

@@ -1,0 +1,66 @@
+{
+  "schema": 1,
+  "robot_id": "gripper_1",
+  "name": "Bench gripper",
+  "bridge_version": "0.1.0",
+  "session": "b1c2d3e4-f5a6-4b7c-8d9e-0f1a2b3c4d5e",
+  "instance": "bench-pc.local:988",
+  "capabilities": {
+    "cancel": false,
+    "feedback": false,
+    "hmac_required": true
+  },
+  "watchdog_mode": "inhibit_new",
+  "heartbeat_interval_s": 0,
+  "tasks": [
+    {
+      "name": "grip",
+      "label": "Grip",
+      "kind": "motion",
+      "timeout_s": 15.5,
+      "description": "Close the gripper on the named object class",
+      "params": {
+        "type": "object",
+        "properties": {
+          "object_class": {
+            "type": "string",
+            "enum": [
+              "mug",
+              "plate",
+              "bottle"
+            ]
+          },
+          "force_n": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 40,
+            "description": "Grip force in newtons"
+          },
+          "retries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 3
+          },
+          "gentle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "object_class"
+        ]
+      }
+    },
+    {
+      "name": "status",
+      "label": "Report status",
+      "kind": "query",
+      "timeout_s": 2,
+      "params": null
+    }
+  ],
+  "ts": 1760356800000,
+  "executor": {
+    "name": "custom",
+    "version": "1.2.0"
+  }
+}

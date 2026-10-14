@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "robot_id": "arm_left",
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc",
+  "seq": 1203,
+  "ts": 1760356804000,
+  "uptime_s": 2406,
+  "ha_clock_offset_ms": 12,
+  "counters": {
+    "accepted": 12,
+    "rejected": 1,
+    "duplicates": 0,
+    "dropped_retained": 0,
+    "dropped_oversize": 0,
+    "dropped_invalid_id": 0,
+    "dropped_queue_full": 0,
+    "publish_errors": 0,
+    "takeovers": 0
+  }
+}

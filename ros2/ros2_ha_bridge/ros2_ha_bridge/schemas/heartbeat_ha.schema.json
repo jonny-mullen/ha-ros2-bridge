@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/heartbeat_ha.schema.json",
+  "title": "heartbeat (HA to ROS)",
+  "description": "Topic {prefix}/ha/heartbeat, HA to ROS, QoS 0, not retained, message expiry 5 s. Published every heartbeat_interval_s (default 2; 0 disables) and never while HA's MQTT client is disconnected. Informational on the node unless watchdog.mode says otherwise. ts feeds the node's ha_clock_offset_ms.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/$defs/counter"
+    },
+    "interval_ms": {
+      "description": "The configured heartbeat interval in milliseconds, so the node can size its watchdog timeout (at least 2.5 times this value).",
+      "type": "integer",
+      "minimum": 1
+    },
+    "instance_id": {
+      "$ref": "common.schema.json#/$defs/ha_instance_id"
+    }
+  },
+  "required": ["schema", "ts", "seq", "interval_ms", "instance_id"],
+  "additionalProperties": true
+}

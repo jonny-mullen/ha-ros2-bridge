@@ -1,0 +1,53 @@
+# ha-ros2-bridge: tool configuration shared by both halves of the monorepo.
+# There is deliberately no [project] table. The Home Assistant integration is installed by
+# HACS straight from custom_components/ and the ROS 2 package has its own ament_python
+# setup.py, so nothing here is built or published as a wheel.
+
+[tool.ruff]
+line-length = 99
+# ROS 2 Jazzy runs Python 3.12 and Home Assistant 2026.10 runs 3.14; the lower bound keeps
+# the syntax portable across both halves.
+target-version = "py312"
+extend-exclude = ["ros2/build", "ros2/install", "ros2/log"]
+# Lint rules: custom_components/ and tests/ use ruff's default rule set on purpose, so no
+# [tool.ruff.lint] select is given here and "the defaults" always means ruff's own defaults.
+
+[tool.ruff.format]
+quote-style = "double"
+# ros2/ uses single quotes (design: ros2/ quote-style single, line-length 99). Ruff cannot
+# scope a formatter option to one directory from a single configuration file, so that
+# override lives in ros2/ros2_ha_bridge/ruff.toml (which extends this file) and arrives
+# with the first ROS source module in phase 1.
+
+[tool.mypy]
+strict = true
+files = ["custom_components", "ros2/ros2_ha_bridge/ros2_ha_bridge"]
+warn_unreachable = true
+pretty = true
+
+[[tool.mypy.overrides]]
+# ROS 2 Python packages ship no type information.
+module = [
+  "rclpy",
+  "rclpy.*",
+  "std_msgs.*",
+  "action_msgs.*",
+  "launch",
+  "launch.*",
+  "launch_ros",
+  "launch_ros.*",
+  "ament_index_python.*",
+  "ament_flake8.*",
+  "ament_pep257.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests", "ros2/ros2_ha_bridge/test"]
+
+[tool.codespell]
+# British English: only codespell's misspelling dictionaries (clear, rare) are used.
+# The en-GB_to_en-US dictionary is never enabled because it would flag British spellings.
+skip = "./.git,./.venv,./ros2/build,./ros2/install,./ros2/log,./docs/research,./brand"
+ignore-words-list = "hass"

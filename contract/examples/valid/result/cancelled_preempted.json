@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "7b3e9d21-5f6a-4c8b-9e0d-1f2a3b4c5d6e",
+  "robot_id": "arm_left",
+  "task": "wait",
+  "kind": "motion",
+  "status": "cancelled",
+  "goal_status": 5,
+  "code": "preempted",
+  "reason": "Stopped by command 2d4f6a8c-0e1b-4a3c-8d5e-6f7a8b9c0d1e",
+  "data": {},
+  "started_at": 1760356805000,
+  "finished_at": 1760356809000,
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "ts": 1760356809001
+}
