@@ -57,6 +57,25 @@ Zigbee device -> Zigbee2MQTT -> zigbee2mqtt/{name} on Mosquitto
 
 The node subscribes to each configured `mirror.topics` entry and its availability sibling at QoS 0 and republishes the payload unchanged as a `std_msgs/String` envelope on `~/mqtt_in` with the source topic and `source_available`. Any ROS 2 node, the executor included, can subscribe. HA receives the same message from the broker at the same time, so neither side waits for the other. This is the path for raw events where every millisecond matters (Q3).
 
+#### Sensor mirror envelope
+
+`SensorMirror` (`sensor_mirror.py`) turns every message on a mirrored topic, or on its availability sibling, into one JSON object with these keys, always present and always in this order:
+
+```json
+{"topic": "zigbee2mqtt/kitchen_motion",
+ "payload": "{\"occupancy\":true}",
+ "encoding": "utf-8",
+ "retain": false,
+ "source_available": true,
+ "rx_ts_ms": 1760356800123}
+```
+
+- `payload` is the message decoded as UTF-8 and `encoding` is `utf-8`; when the bytes are not UTF-8, `payload` is their base64 form and `encoding` is `base64`. Nothing is reformatted in between.
+- `source_available` is the last availability seen on the topic's sibling (Zigbee2MQTT's `{"state":"online"}` and the plain word `online` are both understood, as are both `offline` forms), or `null` when no sibling message has been seen. An empty availability payload (a retained clear) resets it to `null`.
+- `rx_ts_ms` is the epoch millisecond the node received the message; `retain` is the delivery's RETAIN flag.
+- An availability message is mirrored as an envelope too, so a consumer learns that a sensor went offline without waiting for a data message that will not come.
+- Nothing raises on an inbound message: a bad topic, a bad payload type, an oversize message, an unparseable availability word or a failing output callable is logged and counted. Only the configuration (the topic list and the suffix) is validated eagerly, with `TypeError` for a wrong type and `ValueError` for a bad value, because a bad filter is an operator error that should stop the node at start-up rather than silence a sensor path.
+
 ### Normalised sensor path (any HA entity to ROS 2)
 
 ```text
@@ -76,14 +95,14 @@ Button press | automation calling send_task | Assist intent
    -> Store.async_save (command outstanding before anything leaves HA)
    -> mqtt.async_publish {prefix}/{robot}/cmd, QoS 1, not retained, expiry ceil(max_age_ms/1000)
    -> broker -> node paho thread: size check, deque, guard trigger
-   -> node main thread: Authoriser steps 0 to 9 (retained drop, oversize, UUID id, schema, robot id,
-      HMAC, dedupe, freshness, allowlist and params, state gating)
+   -> node main thread: Authoriser steps 0 to 9 in execution order (retained drop, oversize, UUID id,
+      dedupe, schema, robot id, HMAC, freshness, allowlist and params, state gating)
    -> TaskManager -> executor.start(req, handle)
    -> ack published retained (120 s expiry) -> state busy published retained
    <- HA: ack matched by id, sent -> running, ros2_bridge_task_ack fired, wait: ack callers released
 ```
 
-The first failing step wins and the ack says which. A command whose id is not a UUID gets no ack at all because there is no safe topic to answer on; it is counted instead. The full order is in [mqtt-contract.md](mqtt-contract.md#command-handling-on-the-node).
+The first failing step wins and the ack says which. Dedupe runs the moment the id is known, before the schema, signature and freshness checks, so a replayed id always gets the stored ack bytes back and a later malformed or unsigned replay can never overwrite a stored `accepted` ack. A command whose id is not a UUID gets no ack at all because there is no safe topic to answer on; it is counted instead. The full order is in [mqtt-contract.md](mqtt-contract.md#command-handling-on-the-node).
 
 ### Result path (robot to HA)
 
@@ -103,13 +122,14 @@ The executor is the only part of the system that knows how an arm moves. It live
 
 | Type | Purpose |
 |---|---|
-| `TaskSpec` | One catalogue entry: `name`, `label`, `kind` (`motion`, `control`, `query`), `timeout_s`, optional `params` schema subset, `description`. |
-| `TaskRequest` | What the bridge hands to `start`: `id`, `task`, `params`, `issued_at`, effective `timeout_s`, `source`. |
-| `TaskResult` | `status` (`succeeded`, `cancelled`, `aborted`), `code`, `reason`, `data`; `goal_status` is derived (4, 5, 6). |
-| `TaskRejected` | Raise from `start` to refuse a task; becomes `rejected_executor` with the given reason. |
-| `TaskHandle` | One per task, thread-safe: `feedback(progress, stage, message)` and `finish(result)`. Calls after the terminal finish are logged and ignored. |
-| `BridgeContext` | Given to `setup`: `node`, `logger`, `robot_id`, and thread-safe `post(fn)`, `set_error(code, reason)`, `clear_error()`, `set_paused(bool)`, `ha_link_ok()`. |
-| `TaskExecutor` | Abstract base: `setup(ctx)` (blocking waits allowed here only), `tasks()`, `start(req, handle)` (must return promptly), `cancel(task_id)` (must lead to `finish(cancelled)` within `executor.cancel_grace_s`), optional `stop_and_hold(reason)`, `health()`, `shutdown()`. |
+| `TaskSpec` | Frozen dataclass, one catalogue entry: `name`, `label`, `kind: TaskKind = 'motion'` (`motion`, `control`, `query`), `timeout_s: float = 60.0`, `params: Mapping | None = None` (a params-subset JSON Schema, `None` for a task without parameters), `description: str = ''`. Checked with `protocol.validate_task_spec` at start-up. |
+| `TaskRequest` | Frozen dataclass handed to `start`: `id`, `task`, `params`, `issued_at`, `timeout_s` (already resolved: the command's value or the announced default, clamped to the cap), `source` (HA's record of who raised the command; never interpreted). |
+| `TaskResult` | Frozen dataclass passed to `finish`: `status: ResultStatus` (`succeeded`, `cancelled`, `aborted`), `code: str`, `reason: str = ''`, `data: Mapping = {}`; the `goal_status` property derives 4, 5 or 6. `code` is normalised before it reaches the wire. |
+| `TaskRejected(code='rejected_executor', reason='')` | Raise from `start` to refuse a task; the ack is `rejected_executor` with the given reason (`code` is logged, not sent) and the robot stays idle. |
+| `TaskHandle` | Protocol, one per task, every method thread-safe: `task_id`, `feedback(progress=None, stage='', message='')` (throttled by the bridge) and `finish(result)` (exactly once). Calls after the terminal finish, a second `finish` included, are logged and ignored. |
+| `BridgeContext` | Given to `setup`: attributes `robot_id`, `logger`, `node` (the rclpy node in the real bridge, `None` in unit tests), `clock`, `scheduler`, `parameters` (read-only mapping keyed by dotted names, for example `fake.task_duration_s`); thread-safe methods `post(fn)`, `set_error(code, reason)`, `clear_error()`, `set_paused(paused)`, `ha_link_ok()`. |
+| `TaskExecutor` | Abstract base with class attributes `name` and `version` (announced to HA). Abstract: `setup(ctx)` (blocking waits allowed here only), `tasks() -> Sequence[TaskSpec]`, `start(req, handle)` (must return promptly; may call `handle.finish` before returning), `cancel(task_id)` (must lead to `finish(cancelled)` within `executor.cancel_grace_s`, else the bridge forces `aborted/executor_unresponsive`). Defaults: `stop_and_hold(reason)` does nothing, `health() -> (level, message)` reports `('ok', '')`, `shutdown()` does nothing. |
+| `load_executor(spec)` | Resolves `package.module:Attribute` or an entry-point name in `ros2_ha_bridge.executors` to an instance (a concrete subclass is instantiated with no arguments); every failure raises `ExecutorLoadError`, which the node treats as fatal. |
 
 The shipped fake executor implements `reset`, `move_to {pose}`, `wait {seconds}`, `fail {code}`, `hang`, `raise_error`, `clear_error`, `stop`, `pause` and `resume`, deterministically with an injected clock, so the whole HA side can be exercised with no ROS 2 or simulator present. A MoveIt 2 executor drives `/move_action` through a plain rclpy action client: `send_goal_async` inside `start`, feedback callback to `handle.feedback`, `get_result_async` mapping GoalStatus 4, 5, 6, `cancel_goal_async` from `cancel`, and `MoveItErrorCodes` mapped to the result vocabulary with the raw value in `data`.
 
