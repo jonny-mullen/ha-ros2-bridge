@@ -1,0 +1,572 @@
+# serializer version: 1
+# name: test_announce_creates_device_and_entities[binary_sensor.kitchen_left_arm_problem-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'binary_sensor',
+    'entity_category': None,
+    'entity_id': 'binary_sensor.kitchen_left_arm_problem',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Problem',
+    'options': dict({
+    }),
+    'original_device_class': <BinarySensorDeviceClass.PROBLEM: 'problem'>,
+    'original_icon': None,
+    'original_name': 'Problem',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'problem',
+    'unique_id': 'arm_left_problem',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[binary_sensor.kitchen_left_arm_problem-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'problem',
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Problem',
+      'reasons': list([
+      ]),
+    }),
+    'context': <ANY>,
+    'entity_id': 'binary_sensor.kitchen_left_arm_problem',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'off',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_cancel_task-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'button',
+    'entity_category': None,
+    'entity_id': 'button.kitchen_left_arm_cancel_task',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Cancel task',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Cancel task',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'cancel',
+    'unique_id': 'arm_left_cancel',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_cancel_task-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Cancel task',
+    }),
+    'context': <ANY>,
+    'entity_id': 'button.kitchen_left_arm_cancel_task',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_pause-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'button',
+    'entity_category': None,
+    'entity_id': 'button.kitchen_left_arm_pause',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Pause',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Pause',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'task',
+    'unique_id': 'arm_left_task_pause',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_pause-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Pause',
+    }),
+    'context': <ANY>,
+    'entity_id': 'button.kitchen_left_arm_pause',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_reset_to_home-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'button',
+    'entity_category': None,
+    'entity_id': 'button.kitchen_left_arm_reset_to_home',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Reset to home',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Reset to home',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'task',
+    'unique_id': 'arm_left_task_reset',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_reset_to_home-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Reset to home',
+    }),
+    'context': <ANY>,
+    'entity_id': 'button.kitchen_left_arm_reset_to_home',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_resume-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'button',
+    'entity_category': None,
+    'entity_id': 'button.kitchen_left_arm_resume',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Resume',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Resume',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'task',
+    'unique_id': 'arm_left_task_resume',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_resume-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Resume',
+    }),
+    'context': <ANY>,
+    'entity_id': 'button.kitchen_left_arm_resume',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_stop-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'button',
+    'entity_category': None,
+    'entity_id': 'button.kitchen_left_arm_stop',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Stop',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Stop',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'task',
+    'unique_id': 'arm_left_task_stop',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[button.kitchen_left_arm_stop-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Stop',
+    }),
+    'context': <ANY>,
+    'entity_id': 'button.kitchen_left_arm_stop',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[device]
+  DeviceRegistryEntrySnapshot({
+    'area_id': 'kitchen',
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'configuration_url': None,
+    'connections': set({
+    }),
+    'disabled_by': None,
+    'entry_type': None,
+    'hw_version': None,
+    'id': <ANY>,
+    'identifiers': set({
+      tuple(
+        'ros2_bridge',
+        'arm_left',
+      ),
+    }),
+    'labels': set({
+    }),
+    'manufacturer': 'Example Robotics',
+    'model': 'UR3e',
+    'model_id': None,
+    'name': 'Left arm',
+    'name_by_user': None,
+    'serial_number': None,
+    'sw_version': 'driver 2.4.1',
+    'via_device_id': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[entity_ids]
+  list([
+    'binary_sensor.kitchen_left_arm_problem',
+    'button.kitchen_left_arm_cancel_task',
+    'button.kitchen_left_arm_pause',
+    'button.kitchen_left_arm_reset_to_home',
+    'button.kitchen_left_arm_resume',
+    'button.kitchen_left_arm_stop',
+    'event.kitchen_left_arm_task_result',
+    'sensor.kitchen_left_arm_last_result',
+    'sensor.kitchen_left_arm_state',
+  ])
+# ---
+# name: test_announce_creates_device_and_entities[event.kitchen_left_arm_task_result-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': dict({
+      <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
+        'succeeded',
+        'cancelled',
+        'aborted',
+        'rejected',
+        'timeout',
+        'lost',
+      ]),
+    }),
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'event',
+    'entity_category': None,
+    'entity_id': 'event.kitchen_left_arm_task_result',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Task result',
+    'options': dict({
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Task result',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'task_result',
+    'unique_id': 'arm_left_task_result',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[event.kitchen_left_arm_task_result-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EventEntityStateAttribute.EVENT_TYPE: 'event_type'>: None,
+      <EventEntityCapabilityAttribute.EVENT_TYPES: 'event_types'>: list([
+        'succeeded',
+        'cancelled',
+        'aborted',
+        'rejected',
+        'timeout',
+        'lost',
+      ]),
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Task result',
+    }),
+    'context': <ANY>,
+    'entity_id': 'event.kitchen_left_arm_task_result',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[sensor.kitchen_left_arm_last_result-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': dict({
+      <SensorEntityCapabilityAttribute.OPTIONS: 'options'>: list([
+        'succeeded',
+        'cancelled',
+        'aborted',
+        'rejected',
+        'timeout',
+        'lost',
+      ]),
+    }),
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_last_result',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Last result',
+    'options': dict({
+    }),
+    'original_device_class': <SensorDeviceClass.ENUM: 'enum'>,
+    'original_icon': None,
+    'original_name': 'Last result',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'last_result',
+    'unique_id': 'arm_left_last_result',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[sensor.kitchen_left_arm_last_result-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      'code': None,
+      'data': dict({
+      }),
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'enum',
+      'duration_ms': None,
+      'finished_at': None,
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Last result',
+      <SensorEntityCapabilityAttribute.OPTIONS: 'options'>: list([
+        'succeeded',
+        'cancelled',
+        'aborted',
+        'rejected',
+        'timeout',
+        'lost',
+      ]),
+      'reason': None,
+      'synthetic': False,
+      'task': None,
+      'task_id': None,
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_last_result',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_creates_device_and_entities[sensor.kitchen_left_arm_state-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': dict({
+      <SensorEntityCapabilityAttribute.OPTIONS: 'options'>: list([
+        'idle',
+        'busy',
+        'error',
+      ]),
+    }),
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_state',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'State',
+    'options': dict({
+    }),
+    'original_device_class': <SensorDeviceClass.ENUM: 'enum'>,
+    'original_icon': None,
+    'original_name': 'State',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'state',
+    'unique_id': 'arm_left_state',
+    'unit_of_measurement': None,
+  })
+# ---
+# name: test_announce_creates_device_and_entities[sensor.kitchen_left_arm_state-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.DEVICE_CLASS: 'device_class'>: 'enum',
+      'error_code': None,
+      'error_reason': None,
+      'executor_health': dict({
+        'level': 'ok',
+        'message': '',
+      }),
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm State',
+      'ha_link': 'up',
+      'inhibited': False,
+      'instance': 'robotpc:4123',
+      'message': None,
+      <SensorEntityCapabilityAttribute.OPTIONS: 'options'>: list([
+        'idle',
+        'busy',
+        'error',
+      ]),
+      'paused': False,
+      'progress': None,
+      'session': '9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e',
+      'since': 1760356803410,
+      'stage': None,
+      'task': None,
+      'task_id': None,
+      'watchdog_mode': 'none',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_state',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'idle',
+  })
+# ---

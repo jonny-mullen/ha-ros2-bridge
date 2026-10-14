@@ -1,1 +1,4 @@
-{"name": "ROS 2 Bridge", "homeassistant": "2026.10.0"}
+{
+  "name": "ROS 2 Bridge",
+  "homeassistant": "2026.10.0"
+}

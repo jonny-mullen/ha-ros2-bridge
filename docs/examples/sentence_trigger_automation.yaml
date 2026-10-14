@@ -1,0 +1,68 @@
+# Sentence-trigger alternative to the custom sentences file.
+#
+# A sentence trigger needs no file under custom_sentences/: the automation itself owns
+# the words. The trade-off is that the automation has to turn the words into a robot id
+# and a task name on its own, so it is best for a fixed vocabulary. The intents in
+# docs/examples/custom_sentences/en/ros2_bridge.yaml resolve robots by name, area and
+# satellite and tasks by label; use them when you want that flexibility.
+#
+# Add to automations.yaml (or paste into the automation editor's YAML view). Replace the
+# example words to match your robots and tasks. Wildcard slots arrive in trigger.slots.
+
+- alias: "Voice: send a task to a robot (sentence trigger)"
+  description: >-
+    "Tell left arm to reset" sends task reset to robot arm_left. Spaces in the spoken
+    words become underscores so "left arm" addresses arm_left and "move to" addresses
+    move_to. The reply is set from the service response.
+  mode: queued
+  triggers:
+    - trigger: conversation
+      command:
+        - "tell {name} to {task}"
+        - "ask {name} to {task}"
+  actions:
+    - variables:
+        robot_id: "{{ trigger.slots.name | lower | replace(' ', '_') }}"
+        task: "{{ trigger.slots.task | lower | replace(' ', '_') }}"
+    - action: ros2_bridge.send_task
+      data:
+        robot_id: "{{ robot_id }}"
+        task: "{{ task }}"
+        wait: ack
+      response_variable: outcome
+      # A refusal, an unknown robot or task, or a robot that is unavailable raises a
+      # Home Assistant error; continue so the reply below can say what happened.
+      continue_on_error: true
+    - set_conversation_response: >-
+        {% if outcome is defined and outcome.tasks[0].accepted %}
+          Starting {{ trigger.slots.task }} on {{ trigger.slots.name }}
+        {% elif outcome is defined and outcome.tasks[0].accepted is false %}
+          {{ trigger.slots.name }} refused: {{ outcome.tasks[0].reason }}
+        {% elif outcome is defined %}
+          Sent {{ trigger.slots.task }} to {{ trigger.slots.name }}, I will report back
+        {% else %}
+          I could not send {{ trigger.slots.task }} to {{ trigger.slots.name }}
+        {% endif %}
+
+- alias: "Voice: stop a robot (sentence trigger)"
+  mode: queued
+  triggers:
+    - trigger: conversation
+      command:
+        - "stop {name}"
+        - "cancel what {name} is doing"
+  actions:
+    - action: ros2_bridge.cancel_task
+      data:
+        robot_id: "{{ trigger.slots.name | lower | replace(' ', '_') }}"
+        wait: ack
+      response_variable: outcome
+      continue_on_error: true
+    - set_conversation_response: >-
+        {% if outcome is defined and outcome.tasks[0].accepted %}
+          Cancelling the current task on {{ trigger.slots.name }}
+        {% elif outcome is defined and outcome.tasks[0].accepted is false %}
+          {{ trigger.slots.name }} refused: {{ outcome.tasks[0].reason }}
+        {% else %}
+          I could not reach {{ trigger.slots.name }}
+        {% endif %}

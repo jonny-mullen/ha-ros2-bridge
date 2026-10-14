@@ -1,0 +1,148 @@
+# Integration quality scale record for ros2_bridge (custom integration, HACS).
+#
+# Every rule of script/hassfest/quality_scale.py at Home Assistant 2026.10.1 is listed
+# (20 Bronze, 10 Silver, 21 Gold, 3 Platinum; the names were taken from the union of the
+# quality_scale.yaml files shipped with the core integrations of that release). Rules that
+# depend on files other phases of the project write are marked todo with the file named,
+# so this record states what exists today, not what is planned. Exemptions carry the reason.
+rules:
+  # Bronze
+  action-setup: done
+  appropriate-polling:
+    status: exempt
+    comment: >
+      Push integration (iot_class local_push). Every entity sets _attr_should_poll = False and
+      updates from dispatcher signals the MQTT hub sends; nothing polls.
+  brands:
+    status: exempt
+    comment: >
+      The rule refers to the home-assistant/brands repository, which custom integrations do
+      not use. The HACS brand asset ships as brand/icon.png in this repository.
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency:
+    status: exempt
+    comment: >
+      The integration has no pip requirements; it rides the mqtt integration's own client.
+  docs-actions:
+    status: todo
+    comment: docs/install-ha.md and docs/configuration.md gain the three actions in phase 3.
+  docs-conditions:
+    status: exempt
+    comment: The integration provides no conditions.
+  docs-high-level-description: done
+  docs-installation-instructions:
+    status: todo
+    comment: docs/install-ha.md is written in phase 3.
+  docs-removal-instructions:
+    status: todo
+    comment: docs/install-ha.md is written in phase 3.
+  docs-triggers:
+    status: exempt
+    comment: The integration provides no triggers; automations use the bus events.
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure:
+    status: done
+    comment: >
+      The user step aborts when the MQTT integration is not configured or its client does not
+      become available; the broker itself is tested by the mqtt integration.
+  test-before-setup:
+    status: done
+    comment: async_setup_entry raises ConfigEntryNotReady while the MQTT client is unavailable.
+  unique-config-entry:
+    status: exempt
+    comment: single_config_entry is set in the manifest; Home Assistant allows one entry.
+
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters:
+    status: todo
+    comment: The Home Assistant options table is added to docs/configuration.md in phase 3.
+  docs-installation-parameters:
+    status: todo
+    comment: docs/install-ha.md is written in phase 3.
+  entity-unavailable: done
+  integration-owner:
+    status: todo
+    comment: >
+      codeowners holds a placeholder until the public repository exists (decisions.md, open
+      question b).
+  log-when-unavailable: done
+  parallel-updates: done
+  reauthentication-flow:
+    status: exempt
+    comment: >
+      The integration holds no credentials of its own; the broker credentials belong to the
+      mqtt integration and the optional shared secret is an option, not an authentication.
+  test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery:
+    status: done
+    comment: MQTT discovery on ros2_bridge/+/announce (manifest mqtt key).
+  discovery-update-info:
+    status: exempt
+    comment: >
+      Robots have no network address to update; everything reaches them through the broker
+      the mqtt integration is already connected to.
+  docs-data-update:
+    status: todo
+    comment: docs/architecture.md describes the push model; the user-facing page is phase 3.
+  docs-examples:
+    status: todo
+    comment: docs/examples/ gains automations and the sentences file in phase 3.
+  docs-known-limitations:
+    status: todo
+    comment: Written with docs/failure-modes.md in phase 4.
+  docs-supported-devices:
+    status: todo
+    comment: docs/install-ha.md (phase 3) states that any robot running ros2_ha_bridge works.
+  docs-supported-functions:
+    status: todo
+    comment: docs/install-ha.md is written in phase 3.
+  docs-troubleshooting:
+    status: todo
+    comment: docs/troubleshooting.md is written in phase 4.
+  docs-use-cases:
+    status: todo
+    comment: docs/install-ha.md and the example automations are written in phase 3.
+  dynamic-devices: done
+  entity-category:
+    status: exempt
+    comment: >
+      Every entity is a primary feature of the robot (state, last result, problem, task result,
+      task buttons); none is configuration or diagnostic.
+  entity-device-class: done
+  entity-disabled-by-default:
+    status: exempt
+    comment: The entity set is small and every one is used by the kitchen scenario; none is noisy.
+  entity-translations: done
+  exception-translations: done
+  icon-translations: done
+  reconfiguration-flow:
+    status: exempt
+    comment: >
+      The entry's only data is a generated instance id; everything a user may change is an
+      option edited through the options flow.
+  repair-issues: done
+  stale-devices:
+    status: done
+    comment: >
+      A robot's tombstone (empty retained announce) removes its device; a user may delete an
+      offline robot's device, which clears its retained topics.
+
+  # Platinum
+  async-dependency:
+    status: exempt
+    comment: No dependency of its own; the mqtt integration's client is already asynchronous.
+  inject-websession:
+    status: exempt
+    comment: The integration makes no HTTP requests.
+  strict-typing: done

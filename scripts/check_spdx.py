@@ -71,7 +71,12 @@ def walk(root: Path) -> list[Path]:
     """Collect every .py and .sh file under root, skipping SKIP_DIRS."""
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        # Skip the named directories and any virtual environment, whatever it is called.
+        dirnames[:] = sorted(
+            d
+            for d in dirnames
+            if d not in SKIP_DIRS and not (Path(dirpath) / d / "pyvenv.cfg").exists()
+        )
         for name in sorted(filenames):
             if Path(name).suffix in CHECKED_SUFFIXES:
                 found.append(Path(dirpath) / name)

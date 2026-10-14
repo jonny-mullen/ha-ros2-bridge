@@ -1,0 +1,58 @@
+{
+  "entity": {
+    "sensor": {
+      "state": {
+        "default": "mdi:robot-industrial",
+        "state": {
+          "idle": "mdi:robot-industrial-outline",
+          "busy": "mdi:robot-industrial",
+          "error": "mdi:robot-dead"
+        }
+      },
+      "last_result": {
+        "default": "mdi:clipboard-text-clock-outline",
+        "state": {
+          "succeeded": "mdi:check-circle-outline",
+          "cancelled": "mdi:cancel",
+          "aborted": "mdi:alert-octagon-outline",
+          "rejected": "mdi:close-octagon-outline",
+          "timeout": "mdi:timer-alert-outline",
+          "lost": "mdi:help-circle-outline"
+        }
+      }
+    },
+    "binary_sensor": {
+      "problem": {
+        "default": "mdi:check-circle-outline",
+        "state": {
+          "on": "mdi:alert-circle",
+          "off": "mdi:check-circle-outline"
+        }
+      }
+    },
+    "event": {
+      "task_result": {
+        "default": "mdi:flag-checkered"
+      }
+    },
+    "button": {
+      "task": {
+        "default": "mdi:play-circle-outline"
+      },
+      "cancel": {
+        "default": "mdi:stop-circle-outline"
+      }
+    }
+  },
+  "services": {
+    "send_task": {
+      "service": "mdi:send"
+    },
+    "cancel_task": {
+      "service": "mdi:cancel"
+    },
+    "get_robots": {
+      "service": "mdi:robot-industrial"
+    }
+  }
+}

@@ -1,0 +1,256 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "ROS 2 Bridge",
+        "description": "The bridge rides Home Assistant's own MQTT connection, so the broker is already known. Choose the topic prefix the robots publish under and, if the robots require signed commands, the shared secret configured on them.",
+        "data": {
+          "topic_prefix": "Topic prefix",
+          "shared_secret": "Shared secret"
+        },
+        "data_description": {
+          "topic_prefix": "The first part of every bridge topic (prefix, then the robot id, then the message kind). No leading or trailing slash, no wildcards, not the MQTT discovery prefix. Must match the prefix configured on the robots.",
+          "shared_secret": "Optional. When set, every command is signed with HMAC-SHA256 and the robots refuse unsigned commands. Leave empty to send unsigned commands."
+        }
+      },
+      "confirm": {
+        "title": "Robot found",
+        "description": "Found robot {robot_name} announcing under the topic prefix {topic_prefix}. Create the ROS 2 Bridge entry?",
+        "data": {
+          "shared_secret": "Shared secret"
+        },
+        "data_description": {
+          "shared_secret": "Optional. The shared secret configured on the robots, when they require signed commands."
+        }
+      }
+    },
+    "error": {
+      "invalid_prefix": "The topic prefix must not be empty, contain + or #, start or end with a slash, be the MQTT discovery prefix (homeassistant) or start with the reserved segment ha."
+    },
+    "abort": {
+      "already_configured": "The ROS 2 Bridge is already configured.",
+      "single_instance_allowed": "Already configured. Only a single configuration is possible.",
+      "mqtt_not_configured": "The MQTT integration is not configured. Set up MQTT first; the bridge uses its connection.",
+      "mqtt_not_available": "The MQTT client did not become available. Check the MQTT integration and try again.",
+      "invalid_discovery_info": "The discovered message is not a valid robot announce."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "ROS 2 Bridge options",
+        "data": {
+          "topic_prefix": "Topic prefix",
+          "shared_secret": "Shared secret",
+          "heartbeat_interval_s": "Heartbeat interval",
+          "ack_timeout_s": "Acknowledgement timeout",
+          "command_max_age_ms": "Command maximum age",
+          "result_timeout_margin_s": "Result timeout margin",
+          "max_pending_per_robot": "Maximum pending commands per robot",
+          "heartbeat_unavailable_after_s": "Unavailable after missing heartbeats for",
+          "mirror_entities": "Mirrored entities"
+        },
+        "data_description": {
+          "topic_prefix": "Changing the prefix moves every subscription and publication; the robots must be configured with the same prefix.",
+          "shared_secret": "Leave empty to send unsigned commands. When set, it must match the secret configured on the robots.",
+          "heartbeat_interval_s": "How often Home Assistant publishes its heartbeat to the robots, in seconds. 0 disables it; robots then report the link as down.",
+          "ack_timeout_s": "How long to wait for a robot to acknowledge a command before it is reported as not acknowledged (outcome unknown).",
+          "command_max_age_ms": "How long a command stays valid after it is issued, in milliseconds. Robots refuse older commands as stale.",
+          "result_timeout_margin_s": "Extra seconds beyond a task's announced timeout before Home Assistant reports a missing result.",
+          "max_pending_per_robot": "Commands may be outstanding per robot at once; further commands are refused.",
+          "heartbeat_unavailable_after_s": "Seconds without a robot heartbeat before its entities become unavailable. 0 disables this; shorter gaps only turn the problem sensor on.",
+          "mirror_entities": "Entities republished to the robots under the prefix's ha/sensors topics in the canonical sensor schema, one retained message per entity."
+        }
+      }
+    },
+    "error": {
+      "invalid_prefix": "The topic prefix must not be empty, contain + or #, start or end with a slash, be the MQTT discovery prefix (homeassistant) or start with the reserved segment ha."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "state": {
+        "name": "State",
+        "state": {
+          "idle": "Idle",
+          "busy": "Busy",
+          "error": "Error"
+        }
+      },
+      "last_result": {
+        "name": "Last result",
+        "state": {
+          "succeeded": "Succeeded",
+          "cancelled": "Cancelled",
+          "aborted": "Aborted",
+          "rejected": "Rejected",
+          "timeout": "Timed out",
+          "lost": "Lost"
+        }
+      }
+    },
+    "binary_sensor": {
+      "problem": {
+        "name": "Problem"
+      }
+    },
+    "event": {
+      "task_result": {
+        "name": "Task result",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "succeeded": "Succeeded",
+              "cancelled": "Cancelled",
+              "aborted": "Aborted",
+              "rejected": "Rejected",
+              "timeout": "Timed out",
+              "lost": "Lost"
+            }
+          }
+        }
+      }
+    },
+    "button": {
+      "task": {
+        "name": "{label}"
+      },
+      "cancel": {
+        "name": "Cancel task"
+      }
+    }
+  },
+  "selector": {
+    "wait": {
+      "options": {
+        "ack": "Acknowledgement",
+        "result": "Result",
+        "none": "Do not wait"
+      }
+    }
+  },
+  "services": {
+    "send_task": {
+      "name": "Send task",
+      "description": "Sends a task command to one or more robots and optionally waits for the acknowledgement or the result.",
+      "fields": {
+        "device_id": {
+          "name": "Robot device",
+          "description": "The robot device or devices to send the task to."
+        },
+        "robot_id": {
+          "name": "Robot ID",
+          "description": "The robot's id as announced on the broker, as an alternative to a device."
+        },
+        "task": {
+          "name": "Task",
+          "description": "The announced task name, for example reset or move_to."
+        },
+        "params": {
+          "name": "Parameters",
+          "description": "Parameters for the task, matching the schema the robot announced for it."
+        },
+        "wait": {
+          "name": "Wait for",
+          "description": "Return after the acknowledgement (default), after the result, or at once."
+        },
+        "timeout_s": {
+          "name": "Timeout",
+          "description": "Overrides the task's announced timeout, in seconds. The robot may clamp it."
+        },
+        "max_age_ms": {
+          "name": "Maximum age",
+          "description": "Overrides the command maximum age option for this command, in milliseconds."
+        }
+      }
+    },
+    "cancel_task": {
+      "name": "Cancel task",
+      "description": "Cancels the running task of one or more robots, or one task by its id.",
+      "fields": {
+        "device_id": {
+          "name": "Robot device",
+          "description": "The robot device or devices whose task to cancel."
+        },
+        "robot_id": {
+          "name": "Robot ID",
+          "description": "The robot's id as announced on the broker, as an alternative to a device."
+        },
+        "task_id": {
+          "name": "Task ID",
+          "description": "The id of the task to cancel. Leave empty to cancel the robot's active motion task."
+        },
+        "wait": {
+          "name": "Wait for",
+          "description": "Return after the cancel is acknowledged (default), after the cancelled task's result, or at once."
+        },
+        "max_age_ms": {
+          "name": "Maximum age",
+          "description": "Overrides the command maximum age option for this cancel, in milliseconds."
+        }
+      }
+    },
+    "get_robots": {
+      "name": "Get robots",
+      "description": "Returns every announced robot with its availability, state and task catalogue."
+    }
+  },
+  "exceptions": {
+    "not_loaded": {
+      "message": "The ROS 2 Bridge is not loaded."
+    },
+    "not_ready": {
+      "message": "The ROS 2 Bridge is not ready yet: its MQTT subscriptions have not been confirmed."
+    },
+    "robot_unknown": {
+      "message": "Robot {robot_id} is not known; it has not announced itself on the broker."
+    },
+    "robot_unavailable": {
+      "message": "Robot {robot_id} is unavailable."
+    },
+    "task_unknown": {
+      "message": "Robot {robot_id} does not announce a task called {task}."
+    },
+    "invalid_params": {
+      "message": "The parameters for task {task} on robot {robot_id} are invalid: {problems}."
+    },
+    "too_many_pending": {
+      "message": "Robot {robot_id} already has {limit} commands pending."
+    },
+    "publish_failed": {
+      "message": "The command for robot {robot_id} could not be published: {error}. It stays tracked; if the connection returns before the acknowledgement timeout the message is delivered, otherwise the command is reported as not acknowledged (outcome unknown)."
+    },
+    "no_ack": {
+      "message": "Robot {robot_id} did not acknowledge the command in time; the outcome is unknown."
+    },
+    "no_result": {
+      "message": "Robot {robot_id} did not report a result for task {task} before the deadline."
+    },
+    "task_rejected": {
+      "message": "Robot {robot_id} refused task {task}: {reason}."
+    }
+  },
+  "issues": {
+    "clock_skew": {
+      "title": "Clock skew with robot {robot_id}",
+      "description": "Robot {robot_id} reports a clock difference of {skew_ms} ms against Home Assistant. Commands carry an issue time and a maximum age, so a difference above the robot's tolerance makes it refuse them as stale or from the future. Check that both machines use NTP and that their clocks agree to within two seconds. This issue closes by itself once an acknowledgement arrives with an acceptable difference."
+    },
+    "hmac_rejected": {
+      "title": "Robot {robot_id} refused the command signature",
+      "description": "Robot {robot_id} rejected a command as unauthorised: {reason}. Make sure the shared secret in the ROS 2 Bridge options matches the secret configured on the robot, or clear it on both sides to send unsigned commands. This issue closes by itself once the robot accepts a command."
+    },
+    "invalid_announce": {
+      "title": "Robot {robot_id} sent an invalid announce",
+      "description": "The retained message on {topic} is not a valid announce: {reason}. The robot is not shown until it announces correctly. Check the robot's bridge version and its task catalogue, then restart the robot node. This issue closes by itself once a valid announce arrives."
+    },
+    "mqtt_v5_required": {
+      "title": "The MQTT connection does not support message expiry",
+      "description": "Publishing to {topic} with a message expiry interval was refused because Home Assistant's MQTT session is not MQTT 5. Commands were sent without an expiry, so a stale command can sit in the broker until a robot reads it; the robots still refuse commands older than their maximum age. Set the MQTT integration's protocol to 5 and make sure the broker supports it. This issue closes by itself once a publish with an expiry succeeds."
+    },
+    "duplicate_robot_id": {
+      "title": "Two robot nodes may be using the id {robot_id}",
+      "description": "Home Assistant saw evidence that more than one bridge node is publishing as robot {robot_id}: {detail}. Two nodes with one id take each other's broker session over in turn and their state, acknowledgements and results interleave. A node that crashes and restarts repeatedly can trip this check too, which also needs attention. Give each robot its own robot.id parameter and restart the nodes. This issue closes by itself after ten quiet minutes."
+    }
+  }
+}

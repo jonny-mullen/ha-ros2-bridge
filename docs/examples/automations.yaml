@@ -1,0 +1,98 @@
+# Example automations for the ROS 2 Bridge integration.
+#
+# Add to automations.yaml or paste each block into the automation editor's YAML view, then
+# replace the entity ids with your own. Nothing here is installed by the integration.
+#
+# Events the integration fires (see docs/mqtt-contract.md):
+#   ros2_bridge_task_ack          every acknowledgement: accepted, code, reason, late
+#   ros2_bridge_task_result       exactly once per command: status succeeded, cancelled,
+#                                 aborted, rejected, timeout or lost; code, reason, data,
+#                                 kind (motion, control, query), synthetic, replayed
+#   ros2_bridge_task_late_result  a real result that arrived after a synthesised outcome
+
+# 1. The interview's own example: no motion in the kitchen for five minutes turns the lights
+#    off and sends every available robot back to its home pose. The robots are discovered
+#    through get_robots so nothing here names a robot; each send is wait: none because the
+#    outcome is reported by automation 2 below. continue_on_error keeps the loop going when
+#    one robot refuses (for example rejected_busy).
+- alias: "Kitchen idle: lights off and arms home"
+  description: Five minutes without motion turns the kitchen lights off and resets every robot.
+  mode: single
+  triggers:
+    - trigger: state
+      entity_id: binary_sensor.kitchen_motion
+      to: "off"
+      for:
+        minutes: 5
+  actions:
+    - action: light.turn_off
+      target:
+        area_id: kitchen
+    - action: ros2_bridge.get_robots
+      response_variable: robots
+    - repeat:
+        for_each: >-
+          {{ robots.robots | selectattr('available') | map(attribute='robot_id') | list }}
+        sequence:
+          - action: ros2_bridge.send_task
+            data:
+              robot_id: "{{ repeat.item }}"
+              task: reset
+              wait: none
+            continue_on_error: true
+
+# 2. Speak every motion outcome back on the kitchen satellite. Control and query results
+#    (stop, pause, resume) are skipped so a pause does not get announced as a failure.
+#    Swap assist_satellite.announce for tts.speak or a notify action if you prefer.
+- alias: "Robots: speak task outcomes"
+  description: Announce how each motion task ended, including refusals and timeouts.
+  mode: queued
+  triggers:
+    - trigger: event
+      event_type: ros2_bridge_task_result
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.kind == 'motion' }}"
+  actions:
+    - variables:
+        robot: "{{ trigger.event.data.robot_id | replace('_', ' ') }}"
+        task: "{{ trigger.event.data.task | replace('_', ' ') }}"
+        status: "{{ trigger.event.data.status }}"
+        reason: "{{ trigger.event.data.reason }}"
+        code: "{{ trigger.event.data.code }}"
+    - action: assist_satellite.announce
+      target:
+        entity_id: assist_satellite.kitchen_voice_assistant
+      data:
+        message: >-
+          {% if status == 'succeeded' %}
+            {{ robot }} finished {{ task }}.
+          {% elif status == 'rejected' %}
+            {{ robot }} refused {{ task }}: {{ reason or code }}.
+          {% elif status == 'cancelled' %}
+            {{ task }} on {{ robot }} was cancelled.
+          {% elif status in ['timeout', 'lost'] %}
+            I lost track of {{ task }} on {{ robot }} ({{ code }}).
+          {% else %}
+            {{ robot }} could not finish {{ task }}: {{ reason or code }}.
+          {% endif %}
+
+# 3. A notification for anything that went wrong, for households without a voice satellite
+#    or for when nobody is in the kitchen to hear the announcement.
+- alias: "Robots: notify on failures"
+  mode: queued
+  triggers:
+    - trigger: event
+      event_type: ros2_bridge_task_result
+  conditions:
+    - condition: template
+      value_template: "{{ trigger.event.data.status != 'succeeded' }}"
+  actions:
+    - action: notify.persistent_notification
+      data:
+        title: "Robot task {{ trigger.event.data.status }}"
+        message: >-
+          {{ trigger.event.data.robot_id }} / {{ trigger.event.data.task }}:
+          {{ trigger.event.data.code }}{% if trigger.event.data.reason %}
+          ({{ trigger.event.data.reason }}){% endif %}
+          {% if trigger.event.data.synthetic %}(decided by Home Assistant, the robot never answered){% endif %}

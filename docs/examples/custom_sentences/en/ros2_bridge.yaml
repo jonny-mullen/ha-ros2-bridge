@@ -1,0 +1,55 @@
+# Assist sentences for the ROS 2 Bridge intents (English).
+#
+# Install: copy this file to <config>/custom_sentences/en/ros2_bridge.yaml on the Home
+# Assistant machine and reload the conversation integration (Developer tools, YAML,
+# "Conversation") or restart. The default conversation agent then matches these
+# sentences and hands them to the integration's intent handlers, which are registered
+# once at start-up and keep working across options reloads.
+#
+# Slots:
+#   task  what to do, matched by task name ("reset", "move_to") or by the announced label
+#         ("reset to home", "move to named pose"); case does not matter.
+#   name  which robot, by id ("arm_left"), by spoken id ("arm left"), by the announced
+#         name ("Left arm") or by the device name you gave it in Home Assistant.
+#   area  the area whose robot is meant. Without a name or area the robot is taken from
+#         the area of the satellite that heard you, and failing that the only robot there
+#         is. Anything ambiguous is answered with "Which arm do you mean?".
+#
+# All three lists are wildcards, so any task or robot name works without editing this
+# file. A task that needs parameters (for example move_to) cannot be started by voice;
+# the reply says so. Use the send_task service for those.
+language: "en"
+
+intents:
+  Ros2BridgeSendTask:
+    data:
+      - sentences:
+          - "(tell|ask) {name} to {task}"
+          - "{task} (with|on|using) {name}"
+          - "[please] make {name} {task}"
+      - sentences:
+          - "{task} the (arm|robot) in the {area}"
+          - "{task} the {area} (arm|robot)"
+      - sentences:
+          - "{task} the (arm|robot)"
+          - "(arm|robot) {task}"
+
+  Ros2BridgeCancelTask:
+    data:
+      - sentences:
+          - "(stop|cancel) [what] {name} [is doing]"
+          - "(stop|cancel) the [current] task on {name}"
+      - sentences:
+          - "(stop|cancel) the (arm|robot) in the {area}"
+          - "(stop|cancel) the {area} (arm|robot)"
+      - sentences:
+          - "(stop|cancel) the (arm|robot)"
+          - "(arm|robot) (stop|cancel)"
+
+lists:
+  task:
+    wildcard: true
+  name:
+    wildcard: true
+  area:
+    wildcard: true

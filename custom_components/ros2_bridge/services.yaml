@@ -1,0 +1,99 @@
+# Field names and descriptions live in strings.json under services.*; this file holds
+# the selectors. Either device_id or robot_id must be given for send_task and cancel_task.
+send_task:
+  fields:
+    device_id:
+      required: false
+      example: 3f9a1c2e4b5d6f708192a3b4c5d6e7f8
+      selector:
+        device:
+          multiple: true
+          filter:
+            - integration: ros2_bridge
+    robot_id:
+      required: false
+      example: arm_left
+      selector:
+        text:
+    task:
+      required: true
+      example: reset
+      selector:
+        text:
+    params:
+      required: false
+      example: '{"pose": "home"}'
+      selector:
+        object:
+    wait:
+      required: false
+      default: ack
+      selector:
+        select:
+          options:
+            - ack
+            - result
+            - none
+          translation_key: wait
+    timeout_s:
+      required: false
+      example: 120
+      selector:
+        number:
+          min: 1
+          step: 1
+          unit_of_measurement: s
+          mode: box
+    max_age_ms:
+      required: false
+      example: 5000
+      selector:
+        number:
+          min: 1000
+          max: 30000
+          step: 100
+          unit_of_measurement: ms
+          mode: box
+
+cancel_task:
+  fields:
+    device_id:
+      required: false
+      example: 3f9a1c2e4b5d6f708192a3b4c5d6e7f8
+      selector:
+        device:
+          multiple: true
+          filter:
+            - integration: ros2_bridge
+    robot_id:
+      required: false
+      example: arm_left
+      selector:
+        text:
+    task_id:
+      required: false
+      example: 6a0c2b58-1d7e-4a1f-9b2a-3c4d5e6f7a8b
+      selector:
+        text:
+    wait:
+      required: false
+      default: ack
+      selector:
+        select:
+          options:
+            - ack
+            - result
+            - none
+          translation_key: wait
+    max_age_ms:
+      required: false
+      example: 5000
+      selector:
+        number:
+          min: 1000
+          max: 30000
+          step: 100
+          unit_of_measurement: ms
+          mode: box
+
+get_robots: {}

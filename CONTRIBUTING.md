@@ -50,7 +50,7 @@ python scripts/validate_contract.py
 python scripts/sync_contract.py --check
 ```
 
-The rclpy-free ROS 2 core tests and the contract tests run on any Python 3.12 or newer. The HA suite runs in the `ha-tests` container or WSL2 (HA test tooling needs Python 3.14 and does not run on native Windows). The full ROS 2 suite runs under `colcon test` in the `ros:jazzy-ros-base` container via `tools/compose.yaml`. `pre-commit run --all-files` runs the fast subset.
+The rclpy-free ROS 2 core tests and the contract tests run on any Python 3.12 or newer. The HA suite needs Python 3.14 and runs natively on Linux (CI, the `ha-tests` container or WSL2); on a Windows PC run it through `tools/windows_test_shim` (see its README). The full ROS 2 suite runs under `colcon test` in the `ros:jazzy-ros-base` container via `tools/compose.yaml`. `pre-commit run --all-files` runs the fast subset.
 
 ## Decision log rule
 
