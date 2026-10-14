@@ -1,0 +1,10 @@
+# ha-ros2-bridge: ruff settings for the ROS 2 package (ros2/ros2_ha_bridge).
+# Extends the shared root configuration (target py312, default rule set, excludes) and
+# switches the formatter to single quotes for ros2/ only, as docs/decisions.md records.
+# ruff resolves the nearest configuration file for each source file, so this applies to
+# everything under this directory even when ruff runs from the repository root.
+extend = "../../pyproject.toml"
+line-length = 99
+
+[format]
+quote-style = "single"
