@@ -178,6 +178,8 @@ Choices made while adding the failure-modes table and its check, the safety and 
 
 - 2026-10-14: All ten open questions (a) to (j) were put to Jonny one at a time and decided as recorded above; 0.1.0 is released on the same day with the MoveIt executor marked experimental.
 
+- 2026-10-14: Joint telemetry added as an optional, additive part of schema 1 (Jonny's choice, revising interview decision Q17 for a dashboard that shows each arm's seven points of articulation): the announce may carry a `joints` block (unit, names, limits, rate), the node publishes `{prefix}/{robot}/joints` at up to 2 Hz, non-retained with a 5 s expiry and only on change, Home Assistant creates one sensor per joint with a documented recorder exclude, the fake executor simulates seven joints so the dashboard moves without Isaac, and the MoveIt executor forwards `/joint_states`. Reason: a dashboard with live articulation needs positions; the rate and expiry keep it off the recorder's critical path and out of the safety loop.
+
 ## Open questions for Jonny (asked one at a time)
 
 Each is asked on its own, in plain chat with numbered options, as the working agreement requires. Until answered, the proposed default is what the code and documents do.

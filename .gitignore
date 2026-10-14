@@ -21,3 +21,5 @@ tools/.env
 .idea/
 .DS_Store
 Thumbs.db
+# Packaged deliverables for Jonny (rebuilt from the tree; not tracked)
+OUTPUT/
