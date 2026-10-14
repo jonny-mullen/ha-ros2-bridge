@@ -44,7 +44,7 @@ Settings, Devices and services, Add integration, "ROS 2 Bridge". The one form as
 
 It does not ask for the broker: host, port, credentials and TLS come from the MQTT integration. The flow aborts with a plain message if the MQTT integration is not configured, if its client does not become available, or if the bridge is already configured (only one entry is allowed per Home Assistant).
 
-Once the entry exists the integration subscribes to the seven bridge filters, receives the retained announce, availability and state of every robot in the replay burst, and creates one device per robot within a few seconds. If no device appears, see `docs/troubleshooting.md`.
+Once the entry exists the integration subscribes to the eight bridge filters, receives the retained announce, availability and state of every robot in the replay burst, and creates one device per robot within a few seconds. If no device appears, see `docs/troubleshooting.md`.
 
 ## 3. Options
 
@@ -72,10 +72,22 @@ One device per announced robot, named from the announce (`robot`, `manufacturer`
 | Last result (sensor, enum) | Succeeded, Cancelled, Aborted, Rejected, Timed out, Lost | The outcome of the most recent motion task. Control and query tasks (stop, pause, resume) never change it. Attributes: `task_id`, `task`, `code`, `reason`, `data`, `finished_at`, `duration_ms`, `synthetic` (true when Home Assistant decided the outcome because the robot never answered). |
 | Problem (binary sensor) | on, off | On while the robot reports `error`, its executor health is `error`, its heartbeat is stale while the retained availability still says `online`, or the `duplicate_robot_id` repair is open. The `reasons` attribute lists which (`error`, `executor_error`, `heartbeat_stale`, `duplicate_robot_id`). |
 | Task result (event) | Succeeded, Cancelled, Aborted, Rejected, Timed out, Lost | Triggers exactly when the `ros2_bridge_task_result` bus event fires for this robot, with the same data as attributes (`task_id`, `task`, `kind`, `code`, `reason`, `data`, `goal_status`, `started_at`, `finished_at`, `duration_ms`, `synthetic`, `replayed`). A late result does not re-trigger it. |
+| Joint 1 {name}, Joint 2 {name}, ... (sensor, one per announced joint) | a number in ° or rad | Added 2026-10-14 towards 0.2.0. Created only for a robot whose announce carries a `joints` block: one sensor per joint in the announced order, named "Joint {n} {joint name}" (for the fake executor `sensor.fake_arm_1_joint_1_j1` to `sensor.fake_arm_1_joint_7_j7`), unit ° or rad as announced, one decimal in the display, no state class. Attributes: `index` (from 0), `joint_name`, `limit_min`, `limit_max` (null when no limits are announced). Updated from the robot's `joints` topic at up to its announced `rate_hz`; keeps the last value when the stream stalls and is unavailable with the robot. Removed when a later announce drops the joint or the key. Enabled by default; see the recorder note below. |
 | One button per task (button) | press | One button for every announced task that needs no parameters, named with the task's announced label (for the fake executor: Reset to home, Stop, Pause, Resume, and so on). A task with required parameters gets no button and is reachable through the `send_task` action. Pressing publishes the command and waits for the acknowledgement; a refusal or a missing acknowledgement is shown as an error on the button. The buttons follow the catalogue when a robot re-announces. |
 | Cancel task (button) | press | Cancels the robot's active motion task. |
 
 Every entity of a robot is unavailable while Home Assistant's MQTT client is disconnected, while the robot's availability topic says `offline` (its Last Will), until the robot has announced since Home Assistant started, and after no heartbeat has arrived for "Unavailable after missing heartbeats for" seconds.
+
+**Recorder note for the joint sensors.** They are ordinary sensors, so the recorder keeps every change (up to two per joint per second while an arm moves, by the node's default rate) for its purge window. An installation that does not want them in the database excludes them in `configuration.yaml` and restarts:
+
+```yaml
+recorder:
+  exclude:
+    entity_globs:
+      - sensor.*_joint_*
+```
+
+The gauges of the example dashboard (`docs/dashboard.md`) still move with the exclude in place, because they show the live state; its history graph of the joints then stays empty. `docs/sensors.md` has the details of the joints path.
 
 ## 5. Actions (services)
 

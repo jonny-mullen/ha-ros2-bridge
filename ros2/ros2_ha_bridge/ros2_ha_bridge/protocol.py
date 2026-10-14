@@ -38,9 +38,13 @@ from ros2_ha_bridge import __version__
 from ros2_ha_bridge.executors.base import (
     GOAL_STATUS,
     HEALTH_LEVELS,
+    JOINT_UNITS,
+    MAX_JOINTS,
     RESULT_STATUSES,
     TASK_KINDS,
     HealthLevel,
+    JointInfo,
+    JointUnit,
     ResultStatus,
     TaskKind,
     TaskSpec,
@@ -65,7 +69,11 @@ __all__ = [
     'HEALTH_LEVELS',
     'HEARTBEAT_EXPIRY_S',
     'INSTANCE_RE',
+    'JOINTS_EXPIRY_S',
+    'JOINT_NAME_RE',
+    'JOINT_UNITS',
     'MAX_ANNOUNCE_BYTES',
+    'MAX_JOINTS',
     'MAX_PAYLOAD_BYTES',
     'MAX_TOPIC_BYTES',
     'PARAM_TYPES',
@@ -84,6 +92,7 @@ __all__ = [
     'AckCode',
     'AckPayload',
     'Announce',
+    'AnnounceJoints',
     'Capabilities',
     'CommandType',
     'Counters',
@@ -99,6 +108,9 @@ __all__ = [
     'HaLink',
     'HealthLevel',
     'HeartbeatPayload',
+    'JointInfo',
+    'JointUnit',
+    'JointsPayload',
     'ParamType',
     'ResultPayload',
     'ResultStatus',
@@ -123,18 +135,21 @@ __all__ = [
     'ha_sensor_topic',
     'heartbeat_topic',
     'is_valid_instance',
+    'is_valid_joint_name',
     'is_valid_prefix',
     'is_valid_result_code',
     'is_valid_robot_id',
     'is_valid_session',
     'is_valid_task_id',
     'is_valid_task_name',
+    'joints_topic',
     'local_instance',
     'new_session',
     'normalise_result_code',
     'prefix_error',
     'result_topic',
     'state_topic',
+    'validate_joint_info',
     'validate_params',
     'validate_params_schema',
     'validate_prefix',
@@ -168,6 +183,7 @@ MAX_TOPIC_BYTES = 65535
 #: Message Expiry Intervals from the topic table (seconds).
 HEARTBEAT_EXPIRY_S = 5
 FEEDBACK_EXPIRY_S = 10
+JOINTS_EXPIRY_S = 5
 DEFAULT_ACK_EXPIRY_S = 120
 DEFAULT_RESULT_EXPIRY_S = 300
 
@@ -185,6 +201,8 @@ AVAILABILITY_OFFLINE = b'offline'
 ROBOT_ID_RE = re.compile(r'[a-z][a-z0-9_]{0,31}')
 #: ``common.schema.json#/$defs/task_name``: same shape as a robot id, nothing reserved.
 TASK_NAME_RE = re.compile(r'[a-z][a-z0-9_]{0,31}')
+#: ``common.schema.json#/$defs/joint_name`` (0.2.0): same shape again, nothing reserved.
+JOINT_NAME_RE = re.compile(r'[a-z][a-z0-9_]{0,31}')
 #: ``common.schema.json#/$defs/task_id``: a lower-case UUID4 string.
 TASK_ID_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}')
 #: ``common.schema.json#/$defs/session``: same shape as a task id.
@@ -245,6 +263,11 @@ def is_valid_robot_id(value: object) -> bool:
 def is_valid_task_name(value: object) -> bool:
     """True for a string matching the task-name pattern."""
     return isinstance(value, str) and TASK_NAME_RE.fullmatch(value) is not None
+
+
+def is_valid_joint_name(value: object) -> bool:
+    """True for a string matching the joint-name pattern (0.2.0)."""
+    return isinstance(value, str) and JOINT_NAME_RE.fullmatch(value) is not None
 
 
 def is_valid_task_id(value: object) -> bool:
@@ -400,6 +423,11 @@ def heartbeat_topic(prefix: str, robot_id: str) -> str:
     return f'{_robot_base(prefix, robot_id)}/heartbeat'
 
 
+def joints_topic(prefix: str, robot_id: str) -> str:
+    """``{prefix}/{robot_id}/joints`` (ROS to HA, QoS 0, not retained, expiry 5 s; 0.2.0)."""
+    return f'{_robot_base(prefix, robot_id)}/joints'
+
+
 def cmd_topic(prefix: str, robot_id: str) -> str:
     """``{prefix}/{robot_id}/cmd`` (HA to ROS, QoS 1, never retained)."""
     return f'{_robot_base(prefix, robot_id)}/cmd'
@@ -465,6 +493,10 @@ class RobotTopics:
     @property
     def heartbeat(self) -> str:
         return heartbeat_topic(self.prefix, self.robot_id)
+
+    @property
+    def joints(self) -> str:
+        return joints_topic(self.prefix, self.robot_id)
 
     @property
     def cmd(self) -> str:
@@ -575,13 +607,47 @@ def _task_spec_payload(spec: TaskSpec) -> dict[str, Any]:
     return entry
 
 
+@dataclass(frozen=True)
+class AnnounceJoints:
+    """``announce.joints`` (0.2.0, optional): what the ``joints`` topic will carry.
+
+    Built from the executor's :class:`~ros2_ha_bridge.executors.base.JointInfo`
+    with :meth:`from_joint_info`; ``rate_hz`` is the node's
+    ``telemetry.joints_rate_hz``. A node with that rate at 0 announces no
+    block at all rather than a block with ``rate_hz`` 0, which the schema
+    refuses.
+    """
+
+    unit: JointUnit
+    names: Sequence[str]
+    limits: Sequence[tuple[float, float]] | None
+    rate_hz: float
+
+    @classmethod
+    def from_joint_info(cls, info: JointInfo, rate_hz: float) -> AnnounceJoints:
+        limits = (
+            None
+            if info.limits is None
+            else tuple((float(low), float(high)) for low, high in info.limits)
+        )
+        return cls(info.unit, tuple(info.names), limits, float(rate_hz))
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            'unit': self.unit,
+            'names': list(self.names),
+            'limits': None if self.limits is None else [list(pair) for pair in self.limits],
+            'rate_hz': self.rate_hz,
+        }
+
+
 @dataclass(frozen=True, kw_only=True)
 class Announce:
     """``{prefix}/{robot_id}/announce``: identity plus the task catalogue.
 
     ``tasks`` is the catalogue after the operator's ``tasks.allow`` intersection.
     The nullable identity strings are always emitted (as ``null`` when unknown);
-    ``executor`` is emitted when given.
+    ``executor`` and ``joints`` are emitted when given.
     """
 
     robot_id: str
@@ -601,6 +667,7 @@ class Announce:
     hw_version: str | None = None
     serial_number: str | None = None
     suggested_area: str | None = None
+    joints: AnnounceJoints | None = None
 
     def to_payload(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -614,16 +681,22 @@ class Announce:
             'serial_number': self.serial_number,
             'suggested_area': self.suggested_area,
             'bridge_version': self.bridge_version,
-            'session': self.session,
-            'instance': self.instance,
-            'capabilities': self.capabilities.to_payload(),
-            'watchdog_mode': self.watchdog_mode,
-            'heartbeat_interval_s': self.heartbeat_interval_s,
-            'tasks': [_task_spec_payload(spec) for spec in self.tasks],
-            'ts': self.ts,
         }
         if self.executor is not None:
             payload['executor'] = self.executor.to_payload()
+        payload.update(
+            {
+                'session': self.session,
+                'instance': self.instance,
+                'capabilities': self.capabilities.to_payload(),
+                'watchdog_mode': self.watchdog_mode,
+                'heartbeat_interval_s': self.heartbeat_interval_s,
+                'tasks': [_task_spec_payload(spec) for spec in self.tasks],
+            }
+        )
+        if self.joints is not None:
+            payload['joints'] = self.joints.to_payload()
+        payload['ts'] = self.ts
         return payload
 
 
@@ -741,6 +814,39 @@ class HeartbeatPayload:
             'uptime_s': self.uptime_s,
             'ha_clock_offset_ms': self.ha_clock_offset_ms,
             'counters': self.counters.to_payload(),
+        }
+
+
+@dataclass(frozen=True, kw_only=True)
+class JointsPayload:
+    """``{prefix}/{robot_id}/joints`` (0.2.0): QoS 0, not retained, expiry 5 s.
+
+    ``positions`` holds one number per announced joint in the announced unit
+    and order; ``velocities`` is ``None`` or one number per position. ``seq``
+    increments per publication within a session so Home Assistant can drop a
+    late copy that overtook a newer one.
+    """
+
+    robot_id: str
+    positions: Sequence[float]
+    session: str
+    instance: str
+    seq: int
+    ts: int
+    velocities: Sequence[float] | None = None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            'schema': SCHEMA_VERSION,
+            'robot_id': self.robot_id,
+            'positions': [float(value) for value in self.positions],
+            'velocities': (
+                None if self.velocities is None else [float(value) for value in self.velocities]
+            ),
+            'session': self.session,
+            'instance': self.instance,
+            'seq': self.seq,
+            'ts': self.ts,
         }
 
 
@@ -1296,6 +1402,56 @@ def validate_task_spec(spec: TaskSpec) -> list[str]:
         errors.append(f'task {spec.name!r} timeout_s must be a number greater than 0')
     if spec.params is not None:
         errors.extend(f'task {spec.name!r}: {e}' for e in validate_params_schema(spec.params))
+    return errors
+
+
+def validate_joint_info(info: JointInfo) -> list[str]:
+    """Check an executor's :class:`JointInfo` against the announce schema's ``joints`` block.
+
+    The schema cannot compare the length of ``limits`` with the length of
+    ``names``, so that rule lives here (and in Home Assistant), with the two
+    the schema does express: 1 to 32 names matching the joint-name pattern,
+    and each limit a pair of numbers. Names must also be distinct, and each
+    pair's minimum must not exceed its maximum, so a gauge built from them is
+    never inside out.
+    """
+    errors: list[str] = []
+    # Plugin input: checked as plain objects, whatever the annotations promise.
+    names: object = info.names
+    limits: object = info.limits
+    if isinstance(names, str) or not isinstance(names, Sequence):
+        return ['joints names must be a list of strings']
+    if not 1 <= len(names) <= MAX_JOINTS:
+        errors.append(f'joints must name between 1 and {MAX_JOINTS} joints, not {len(names)}')
+    for name in names:
+        if not is_valid_joint_name(name):
+            errors.append(f'joint name {name!r} must match ^[a-z][a-z0-9_]{{0,31}}$')
+    if len(set(names)) != len(names):
+        errors.append('joint names must be distinct')
+    if info.unit not in JOINT_UNITS:
+        errors.append(f'joints unit must be one of {", ".join(JOINT_UNITS)}, not {info.unit!r}')
+    if limits is None:
+        return errors
+    if isinstance(limits, str) or not isinstance(limits, Sequence):
+        errors.append('joints limits must be null or a list of [minimum, maximum] pairs')
+        return errors
+    if len(limits) != len(names):
+        errors.append(
+            f'joints limits has {len(limits)} pair(s) for {len(names)} name(s); '
+            'give one pair per name or null'
+        )
+    for index, pair in enumerate(limits):
+        if (
+            isinstance(pair, str)
+            or not isinstance(pair, Sequence)
+            or len(pair) != 2
+            or not all(_is_number(bound) for bound in pair)
+        ):
+            errors.append(f'joints limits[{index}] must be a pair of finite numbers')
+            continue
+        low, high = pair
+        if low > high:
+            errors.append(f'joints limits[{index}] minimum {low!r} is above maximum {high!r}')
     return errors
 
 

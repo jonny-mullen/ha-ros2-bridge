@@ -17,7 +17,7 @@ from enum import StrEnum
 from typing import Any, Final
 
 DOMAIN: Final = "ros2_bridge"
-VERSION: Final = "0.1.0"
+VERSION: Final = "0.2.0"
 #: Every JSON payload carries ``"schema": 1``; schema 1 only ever gains optional fields.
 SCHEMA_VERSION: Final = 1
 
@@ -125,6 +125,10 @@ AVAILABILITY_OFFLINE: Final = "offline"
 ROBOT_ID_RE: Final = re.compile(r"[a-z][a-z0-9_]{0,31}")
 #: ``common.schema.json#/$defs/task_name``: same shape as a robot id, nothing reserved.
 TASK_NAME_RE: Final = re.compile(r"[a-z][a-z0-9_]{0,31}")
+#: ``common.schema.json#/$defs/joint_name``: same shape as a task name (0.2.0).
+JOINT_NAME_RE: Final = re.compile(r"[a-z][a-z0-9_]{0,31}")
+#: Upper bound on the announced joint names and on the positions of one joints payload.
+MAX_JOINTS: Final = 32
 #: ``common.schema.json#/$defs/task_id``: a lower-case UUID4 string.
 TASK_ID_RE: Final = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
@@ -169,6 +173,11 @@ def state_topic(prefix: str, robot_id: str) -> str:
 def heartbeat_topic(prefix: str, robot_id: str) -> str:
     """``{prefix}/{robot_id}/heartbeat`` (ROS to HA, QoS 0, not retained, expiry 5 s)."""
     return robot_topic(prefix, robot_id, "heartbeat")
+
+
+def joints_topic(prefix: str, robot_id: str) -> str:
+    """``{prefix}/{robot_id}/joints`` (ROS to HA, QoS 0, not retained, expiry 5 s; 0.2.0)."""
+    return robot_topic(prefix, robot_id, "joints")
 
 
 def cmd_topic(prefix: str, robot_id: str) -> str:
@@ -221,6 +230,11 @@ def heartbeat_filter(prefix: str) -> str:
     return f"{prefix}/+/heartbeat"
 
 
+def joints_filter(prefix: str) -> str:
+    """Subscription filter ``{prefix}/+/joints``."""
+    return f"{prefix}/+/joints"
+
+
 def ack_filter(prefix: str) -> str:
     """Subscription filter ``{prefix}/+/task/+/ack``."""
     return f"{prefix}/+/task/+/ack"
@@ -247,6 +261,11 @@ SIGNAL_ROBOT_UPDATED: Final = f"{DOMAIN}_robot_updated"
 SIGNAL_ROBOT_REMOVED: Final = f"{DOMAIN}_robot_removed"
 #: ``(robot_id, added_task_names, removed_task_names)`` when a re-announce changes the catalogue.
 SIGNAL_ROBOT_TASKS_CHANGED: Final = f"{DOMAIN}_robot_tasks_changed"
+#: ``(robot_id, added_indices, removed_indices)`` when a re-announce changes the joints block.
+#: An index whose name, unit or limits changed appears in both tuples (removed, then added).
+SIGNAL_ROBOT_JOINTS_CHANGED: Final = f"{DOMAIN}_robot_joints_changed"
+#: ``(robot_id,)`` when a joints payload was accepted; only the joint sensors listen.
+SIGNAL_ROBOT_JOINTS_UPDATED: Final = f"{DOMAIN}_robot_joints_updated"
 SIGNAL_CONNECTION_CHANGED: Final = f"{DOMAIN}_connection_changed"
 SIGNAL_TASK_EVENT: Final = f"{DOMAIN}_task_event"
 
@@ -309,6 +328,17 @@ class Availability(StrEnum):
 
     ONLINE = AVAILABILITY_ONLINE
     OFFLINE = AVAILABILITY_OFFLINE
+
+
+class JointUnit(StrEnum):
+    """``announce.joints.unit``: the unit of every joint position (0.2.0)."""
+
+    DEG = "deg"
+    RAD = "rad"
+
+
+#: The unit of measurement a joint sensor shows for each announced unit.
+JOINT_UNIT_SYMBOLS: Final[dict[JointUnit, str]] = {JointUnit.DEG: "°", JointUnit.RAD: "rad"}
 
 
 class ResultStatus(StrEnum):

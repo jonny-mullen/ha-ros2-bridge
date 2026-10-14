@@ -45,11 +45,13 @@ from ros2_ha_bridge.authoriser import (
     DEFAULT_TASK_TIMEOUT_CAP_S,
 )
 from ros2_ha_bridge.dedupe_store import DEFAULT_DEDUPE_SIZE, DEFAULT_DEDUPE_WINDOW_S
+from ros2_ha_bridge.executors.base import JointUnit
 from ros2_ha_bridge.executors.fake import (
     DEFAULT_FEEDBACK_HZ,
     DEFAULT_TASK_DURATION_S,
     ENTRY_POINT_NAME,
 )
+from ros2_ha_bridge.joints_publisher import DEFAULT_JOINTS_RATE_HZ, default_min_delta
 from ros2_ha_bridge.protocol import (
     DEFAULT_ACK_EXPIRY_S,
     DEFAULT_CLOCK_SKEW_TOLERANCE_MS,
@@ -92,6 +94,7 @@ __all__ = [
     'ParameterSpec',
     'ReplySettings',
     'RobotSettings',
+    'TelemetrySettings',
     'TlsSettings',
     'WatchdogSettings',
     'default_values',
@@ -351,6 +354,19 @@ PARAMETERS: tuple[ParameterSpec, ...] = (
         'Period of the robot heartbeat; 0 disables it.',
     ),
     _spec(
+        'telemetry.joints_rate_hz',
+        'double',
+        DEFAULT_JOINTS_RATE_HZ,
+        'Most joints messages per second; 0 disables joint telemetry and the announce block.',
+    ),
+    _spec(
+        'telemetry.joints_min_delta',
+        'double',
+        0.0,
+        'Least movement of one joint that publishes; 0 means the unit default (0.5 deg, 0.01 rad), '
+        'so a tiny positive value, not 0, publishes every change.',
+    ),
+    _spec(
         'watchdog.mode',
         'string',
         'none',
@@ -510,6 +526,32 @@ class ReplySettings:
 
 
 @dataclass(frozen=True)
+class TelemetrySettings:
+    """``telemetry.*`` (0.2.0): the joint telemetry throttle.
+
+    ``joints_rate_hz`` 0 disables the ``joints`` topic and the announce block.
+    ``joints_min_delta`` 0 (the default) means the announced unit's default,
+    0.5 for ``deg`` and 0.01 for ``rad``, resolved by :meth:`min_delta_for`
+    once the executor has said which unit it reports in. Because 0 is that
+    sentinel, the publisher's "any change" setting (a delta of exactly 0) is
+    not reachable through the parameter; a tiny positive value (``0.001``)
+    does the same job, and the node logs the effective delta at start-up.
+    """
+
+    joints_rate_hz: float = DEFAULT_JOINTS_RATE_HZ
+    joints_min_delta: float = 0.0
+
+    @property
+    def joints_enabled(self) -> bool:
+        """True when the node publishes joint telemetry for an executor that has joints."""
+        return self.joints_rate_hz > 0
+
+    def min_delta_for(self, unit: JointUnit) -> float:
+        """The effective minimum movement in ``unit``: the parameter, or the unit default."""
+        return self.joints_min_delta if self.joints_min_delta > 0 else default_min_delta(unit)
+
+
+@dataclass(frozen=True)
 class WatchdogSettings:
     """``watchdog.*``; ``timeout_s`` is a floor, clamped at run time to the HA interval."""
 
@@ -549,6 +591,7 @@ class BridgeSettings:
     data_dir: Path | None = Path(os.path.expanduser(DEFAULT_DATA_DIR))
     reply: ReplySettings = ReplySettings()
     heartbeat_interval_s: float = 2.0
+    telemetry: TelemetrySettings = TelemetrySettings()
     watchdog: WatchdogSettings = WatchdogSettings()
     mirror: MirrorSettings = MirrorSettings()
     fake: FakeSettings = FakeSettings()
@@ -608,6 +651,8 @@ class BridgeSettings:
             'reply.feedback_max_rate_hz': reply.feedback_max_rate_hz,
             'reply.retained_rejections_per_minute': reply.retained_rejections_per_minute,
             'heartbeat.interval_s': self.heartbeat_interval_s,
+            'telemetry.joints_rate_hz': self.telemetry.joints_rate_hz,
+            'telemetry.joints_min_delta': self.telemetry.joints_min_delta,
             'watchdog.mode': self.watchdog.mode,
             'watchdog.timeout_s': self.watchdog.timeout_s,
             'mirror.topics': list(self.mirror.topics),
@@ -758,6 +803,10 @@ def settings_from_mapping(
         data_dir=data_dir,
         reply=reply,
         heartbeat_interval_s=read.number('heartbeat.interval_s', minimum=0),
+        telemetry=TelemetrySettings(
+            joints_rate_hz=read.number('telemetry.joints_rate_hz', minimum=0),
+            joints_min_delta=read.number('telemetry.joints_min_delta', minimum=0),
+        ),
         watchdog=watchdog,
         mirror=_mirror_settings(read),
         fake=FakeSettings(

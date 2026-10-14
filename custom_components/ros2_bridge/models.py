@@ -2,9 +2,9 @@
 # SPDX-License-Identifier: Apache-2.0
 """Dataclasses of the ROS 2 Bridge integration.
 
-The frozen classes (``TaskSpec``, ``Announce``, ``RobotState``, ``Heartbeat``,
-``Ack``, ``Feedback``, ``Result``) are what ``protocol.py`` returns for a
-decoded inbound payload. ``Robot`` is the hub's mutable runtime view of one
+The frozen classes (``TaskSpec``, ``JointInfo``, ``Announce``, ``RobotState``,
+``Heartbeat``, ``Ack``, ``Feedback``, ``Result``, ``Joints``) are what
+``protocol.py`` returns for a decoded inbound payload. ``Robot`` is the hub's mutable runtime view of one
 robot, ``LastResult`` what the ``last_result`` sensor shows, and
 ``PendingCommand`` one tracked command id with its state machine fields and
 its Store form. Nothing here imports Home Assistant.
@@ -17,12 +17,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
+    JOINT_UNIT_SYMBOLS,
     OUTSTANDING_STATES,
     Availability,
     CommandState,
     CommandType,
     HaLink,
     HealthLevel,
+    JointUnit,
     ResultStatus,
     RobotStatus,
     TaskKind,
@@ -73,8 +75,55 @@ class TaskSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class JointInfo:
+    """The optional ``joints`` block of an announce (0.2.0): what the joints topic carries.
+
+    ``names`` is the publication order of the positions; ``limits`` is ``None``
+    when the executor knows none, otherwise one ``(minimum, maximum)`` pair per
+    name in ``unit``. Both lengths agree by construction (``protocol.py``
+    ignores a block whose lengths differ).
+    """
+
+    unit: JointUnit
+    names: tuple[str, ...]
+    limits: tuple[tuple[float, float], ...] | None
+    rate_hz: float
+
+    @property
+    def count(self) -> int:
+        return len(self.names)
+
+    @property
+    def unit_symbol(self) -> str:
+        """The unit of measurement the joint sensors show (``°`` or ``rad``)."""
+        return JOINT_UNIT_SYMBOLS[self.unit]
+
+    def limit(self, index: int) -> tuple[float, float] | None:
+        """The ``(minimum, maximum)`` of joint ``index``, or ``None`` when none was announced."""
+        return None if self.limits is None else self.limits[index]
+
+    def joint_key(self, index: int) -> tuple[str, str, tuple[float, float] | None]:
+        """What identifies one joint sensor's configuration: name, unit and limits."""
+        return (self.names[index], str(self.unit), self.limit(index))
+
+    def to_dict(self) -> dict[str, Any]:
+        """The block as a plain dict (diagnostics)."""
+        return {
+            "unit": str(self.unit),
+            "names": list(self.names),
+            "limits": None if self.limits is None else [list(pair) for pair in self.limits],
+            "rate_hz": self.rate_hz,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class Announce:
-    """``{prefix}/{robot_id}/announce``: identity plus the task catalogue."""
+    """``{prefix}/{robot_id}/announce``: identity plus the task catalogue.
+
+    ``joints`` is the decoded ``joints`` block, or ``None`` when the announce
+    has none or when the block was ignored because its ``limits`` and ``names``
+    lengths differ; ``joints_ignored`` then says why.
+    """
 
     robot_id: str
     name: str
@@ -96,6 +145,8 @@ class Announce:
     suggested_area: str | None = None
     executor_name: str | None = None
     executor_version: str | None = None
+    joints: JointInfo | None = None
+    joints_ignored: str | None = None
 
     def task(self, name: str) -> TaskSpec | None:
         """The announced task called ``name``, or ``None``."""
@@ -143,6 +194,8 @@ class Announce:
             "watchdog_mode": str(self.watchdog_mode),
             "heartbeat_interval_s": self.heartbeat_interval_s,
             "tasks": [spec.to_dict() for spec in self.tasks],
+            "joints": None if self.joints is None else self.joints.to_dict(),
+            "joints_ignored": self.joints_ignored,
             "ts": self.ts,
         }
 
@@ -296,6 +349,34 @@ class Result:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class Joints:
+    """``{prefix}/{robot_id}/joints`` (0.2.0): one set of joint positions.
+
+    ``positions`` follows the order of the announced ``JointInfo.names``;
+    ``velocities`` is ``None`` or one value per position.
+    """
+
+    robot_id: str
+    positions: tuple[float, ...]
+    velocities: tuple[float, ...] | None
+    session: str
+    instance: str
+    seq: int
+    ts: int
+
+    def to_dict(self) -> dict[str, Any]:
+        """The payload as a plain dict (diagnostics)."""
+        return {
+            "positions": list(self.positions),
+            "velocities": None if self.velocities is None else list(self.velocities),
+            "session": self.session,
+            "instance": self.instance,
+            "seq": self.seq,
+            "ts": self.ts,
+        }
+
+
 # --------------------------------------------------------------------------- runtime views
 
 
@@ -351,6 +432,8 @@ class Robot:
     counters: dict[str, int] = field(default_factory=dict)
     ha_clock_offset_ms: int | None = None
     feedback: Feedback | None = None
+    #: The latest accepted joints payload; ``None`` until one arrives for the announced block.
+    joints: Joints | None = None
     last_ack: Ack | None = None
     last_result: LastResult | None = None
     #: Hub clock values of the session changes seen in the duplicate-detection window.
@@ -386,6 +469,11 @@ class Robot:
     @property
     def tasks(self) -> tuple[TaskSpec, ...]:
         return () if self.announce is None else self.announce.tasks
+
+    @property
+    def joint_info(self) -> JointInfo | None:
+        """The announced joints block, or ``None`` for a robot without joint telemetry."""
+        return None if self.announce is None else self.announce.joints
 
 
 # --------------------------------------------------------------------------- commands

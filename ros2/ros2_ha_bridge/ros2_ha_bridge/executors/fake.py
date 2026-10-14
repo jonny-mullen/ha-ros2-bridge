@@ -10,18 +10,33 @@ no simulator. Every task is deterministic against the injected
 ``fake.feedback_hz`` (2), so a test drives it with ``FakeClock.advance()`` and
 the live node drives it with real rclpy timers.
 
+Joints (0.2.0): the fake simulates a seven-joint arm, ``j1`` to ``j7`` in
+degrees, limited to [-170, 170] except ``j4`` and ``j6`` at [-120, 120]. It
+starts at the ``home`` pose (all zero) and keeps its positions across tasks.
+``reset`` and ``move_to`` interpolate linearly from the current positions to
+the target pose over ``task_duration_s``, reporting positions through
+``ctx.report_joints`` once at ``setup``, on every feedback tick
+(``1 / feedback_hz`` seconds) and at the end of every motion; ``wait`` holds;
+``fail`` moves halfway towards the ``pick`` pose and then aborts; ``pause``
+freezes the positions where they are and ``resume`` continues from there; a
+cancel, ``stop`` or ``stop_and_hold`` freezes them where they are. The named
+poses are ``home``, ``pick``, ``place`` and ``wave``; ``move_to`` offers them
+as an enum and refuses any other name.
+
 Task catalogue (the ``kind`` decides how the bridge gates it):
 
 ``reset`` (motion)
-    Succeeds after ``task_duration_s`` with ``ok``.
+    Moves to ``home`` and succeeds after ``task_duration_s`` with ``ok``.
 ``move_to {pose}`` (motion)
-    Succeeds after ``task_duration_s`` with ``ok`` and ``data.pose``.
+    Moves to the named pose and succeeds after ``task_duration_s`` with
+    ``ok`` and ``data.pose``.
 ``wait {seconds}`` (motion)
-    Runs for ``seconds`` with progress feedback; cancellable.
+    Runs for ``seconds`` with progress feedback, holding position; cancellable.
 ``fail {code}`` (motion)
-    Aborts after ``task_duration_s`` with the chosen MoveIt failure class:
-    ``collision``, ``self_collision``, ``no_trajectory``, ``planning_failed``,
-    ``control_failed`` or ``invalid_goal``.
+    Moves halfway towards ``pick`` and aborts after ``task_duration_s`` with
+    the chosen MoveIt failure class: ``collision``, ``self_collision``,
+    ``no_trajectory``, ``planning_failed``, ``control_failed`` or
+    ``invalid_goal``.
 ``hang`` (motion, timeout 10 s)
     Never finishes and ignores ``cancel``, so the bridge's task timeout, cancel
     grace and forced ``aborted/timeout`` can be seen end to end.
@@ -56,6 +71,8 @@ from ros2_ha_bridge.clock import Clock, Scheduler, TimerHandle
 from ros2_ha_bridge.executors.base import (
     BridgeContext,
     HealthLevel,
+    JointInfo,
+    JointUnit,
     TaskExecutor,
     TaskHandle,
     TaskRejected,
@@ -71,15 +88,24 @@ __all__ = [
     'ENTRY_POINT_NAME',
     'FAILURE_CLASSES',
     'FAILURE_REASONS',
+    'FAIL_MOTION_FRACTION',
+    'FAIL_TOWARDS_POSE',
     'HANG_TIMEOUT_S',
+    'HOME_POSE',
+    'JOINT_INFO',
+    'JOINT_LIMITS',
+    'JOINT_NAMES',
+    'JOINT_UNIT',
+    'POSES',
     'FakeExecutor',
+    'interpolate',
 ]
 
 #: The entry-point name this executor is registered under (``executor: fake``).
 ENTRY_POINT_NAME = 'fake'
 #: ``fake.task_duration_s`` default: how long reset, move_to and fail take.
 DEFAULT_TASK_DURATION_S = 2.0
-#: ``fake.feedback_hz`` default: feedback rate of the running motion task (0 disables).
+#: ``fake.feedback_hz`` default: feedback (and joint report) rate of a running motion task.
 DEFAULT_FEEDBACK_HZ = 2.0
 #: Announced timeout of ``hang``; the bridge forces the abort this long after acceptance.
 HANG_TIMEOUT_S = 10.0
@@ -102,11 +128,45 @@ FAILURE_REASONS: Mapping[str, str] = {
     'invalid_goal': 'The goal is not valid for this arm',
 }
 
+# --------------------------------------------------------------------------- the seven joints
+
+#: The simulated arm: seven joints in degrees, as the contract's golden announce lists them.
+JOINT_NAMES: tuple[str, ...] = ('j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7')
+JOINT_UNIT: JointUnit = 'deg'
+JOINT_LIMITS: tuple[tuple[float, float], ...] = (
+    (-170.0, 170.0),
+    (-170.0, 170.0),
+    (-170.0, 170.0),
+    (-120.0, 120.0),
+    (-170.0, 170.0),
+    (-120.0, 120.0),
+    (-170.0, 170.0),
+)
+JOINT_INFO = JointInfo(names=JOINT_NAMES, unit=JOINT_UNIT, limits=JOINT_LIMITS)
+#: The pose ``reset`` returns to, and where the arm starts.
+HOME_POSE = 'home'
+#: Named poses in degrees, every value inside its joint's limits; ``move_to`` offers these.
+POSES: Mapping[str, tuple[float, ...]] = {
+    'home': (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+    'pick': (35.0, -40.0, 20.0, -95.0, 10.0, 60.0, 45.0),
+    'place': (-50.0, -30.0, 15.0, -80.0, -20.0, 75.0, -30.0),
+    'wave': (0.0, -20.0, 0.0, -60.0, 90.0, 40.0, 0.0),
+}
+#: ``fail`` heads for this pose and covers this fraction of the way before it aborts.
+FAIL_TOWARDS_POSE = 'pick'
+FAIL_MOTION_FRACTION = 0.5
+
 _LOGGER_NAME = 'ros2_ha_bridge.executors.fake'
 
 _MOVE_TO_PARAMS: Mapping[str, Any] = {
     'type': 'object',
-    'properties': {'pose': {'type': 'string', 'description': 'Named pose to move to'}},
+    'properties': {
+        'pose': {
+            'type': 'string',
+            'enum': list(POSES),
+            'description': 'Named pose to move to',
+        }
+    },
     'required': ['pose'],
 }
 _WAIT_PARAMS: Mapping[str, Any] = {
@@ -155,15 +215,29 @@ _CATALOGUE: tuple[TaskSpec, ...] = (
 _SPECS: Mapping[str, TaskSpec] = {spec.name: spec for spec in _CATALOGUE}
 
 
+def interpolate(
+    start: Sequence[float], target: Sequence[float], fraction: float
+) -> tuple[float, ...]:
+    """Positions ``fraction`` of the way (0 to 1, clamped) from ``start`` to ``target``."""
+    fraction = min(1.0, max(0.0, fraction))
+    return tuple(round(a + (b - a) * fraction, 6) for a, b in zip(start, target, strict=True))
+
+
 @dataclass
 class _Run:
-    """One motion task in flight: its timers and what it will finish with."""
+    """One motion task in flight: its timers, its motion and what it will finish with."""
 
     request: TaskRequest
     handle: TaskHandle
     duration_s: float
     outcome: TaskResult
     started_monotonic: float
+    #: Where the joints were when the task began.
+    start_positions: tuple[float, ...]
+    #: Where the motion heads; ``None`` holds position (``wait``).
+    target_positions: tuple[float, ...] | None = None
+    #: How much of the way to the target the task covers (``fail`` stops halfway).
+    motion_fraction: float = 1.0
     elapsed_before_pause_s: float = 0.0
     paused_remaining_s: float | None = None
     completion: TimerHandle | None = None
@@ -190,6 +264,7 @@ class FakeExecutor(TaskExecutor):
         self.health_report: tuple[HealthLevel, str] = ('ok', '')
         #: Every reason ``stop_and_hold`` was called with, oldest first.
         self.hold_reasons: list[str] = []
+        self._positions: tuple[float, ...] = POSES[HOME_POSE]
 
     # ------------------------------------------------------------------ TaskExecutor
 
@@ -205,14 +280,21 @@ class FakeExecutor(TaskExecutor):
             ctx.parameters.get('fake.feedback_hz'), DEFAULT_FEEDBACK_HZ
         )
         self._logger.info(
-            'fake executor ready for %s: task_duration_s=%g feedback_hz=%g',
+            'fake executor ready for %s: task_duration_s=%g feedback_hz=%g joints=%d at %s',
             ctx.robot_id,
             self.task_duration_s,
             self.feedback_hz,
+            len(JOINT_NAMES),
+            HOME_POSE,
         )
+        # The starting pose, so Home Assistant sees the joints before the first motion.
+        self._report_joints()
 
     def tasks(self) -> Sequence[TaskSpec]:
         return _CATALOGUE
+
+    def joints(self) -> JointInfo:
+        return JOINT_INFO
 
     def start(self, req: TaskRequest, handle: TaskHandle) -> None:
         spec = _SPECS.get(req.task)
@@ -222,11 +304,21 @@ class FakeExecutor(TaskExecutor):
         if problems:
             raise TaskRejected(reason='; '.join(problems))
         if req.task == 'reset':
-            self._begin(req, handle, self.task_duration_s, TaskResult('succeeded', 'ok'))
+            self._begin(
+                req,
+                handle,
+                self.task_duration_s,
+                TaskResult('succeeded', 'ok', f"Moved to pose '{HOME_POSE}'"),
+                target=POSES[HOME_POSE],
+            )
         elif req.task == 'move_to':
             pose = str(req.params['pose'])
+            target = POSES.get(pose)
+            if target is None:
+                known = ', '.join(POSES)
+                raise TaskRejected(reason=f'unknown pose {pose!r}; known poses: {known}')
             outcome = TaskResult('succeeded', 'ok', f"Moved to pose '{pose}'", {'pose': pose})
-            self._begin(req, handle, self.task_duration_s, outcome)
+            self._begin(req, handle, self.task_duration_s, outcome, target=target)
         elif req.task == 'wait':
             seconds = float(req.params['seconds'])
             outcome = TaskResult('succeeded', 'ok', f'Waited {seconds:g} s', {'seconds': seconds})
@@ -239,7 +331,14 @@ class FakeExecutor(TaskExecutor):
                 FAILURE_REASONS[code],
                 {'simulated': True, 'failure_class': code},
             )
-            self._begin(req, handle, self.task_duration_s, outcome)
+            self._begin(
+                req,
+                handle,
+                self.task_duration_s,
+                outcome,
+                target=POSES[FAIL_TOWARDS_POSE],
+                motion_fraction=FAIL_MOTION_FRACTION,
+            )
         elif req.task == 'hang':
             self._logger.info('task %s: hanging on purpose', req.id)
         elif req.task == 'raise_error':
@@ -261,6 +360,7 @@ class FakeExecutor(TaskExecutor):
             # hang is never registered, so this is also the "ignores cancel" path.
             self._logger.info('cancel for %s: nothing running under that id', task_id)
             return
+        self._freeze(run)
         self._disarm(run)
         run.handle.finish(TaskResult('cancelled', 'cancelled', 'Cancelled by request'))
 
@@ -288,15 +388,37 @@ class FakeExecutor(TaskExecutor):
         run = self._runs.get(task_id)
         return run is not None and run.paused
 
+    @property
+    def positions(self) -> tuple[float, ...]:
+        """The joints as last reported, in degrees, in :data:`JOINT_NAMES` order."""
+        return self._positions
+
     # ------------------------------------------------------------------ motion runs
 
     def _begin(
-        self, req: TaskRequest, handle: TaskHandle, duration_s: float, outcome: TaskResult
+        self,
+        req: TaskRequest,
+        handle: TaskHandle,
+        duration_s: float,
+        outcome: TaskResult,
+        *,
+        target: tuple[float, ...] | None = None,
+        motion_fraction: float = 1.0,
     ) -> None:
+        run = _Run(
+            req,
+            handle,
+            duration_s,
+            outcome,
+            self._clock().monotonic(),
+            self._positions,
+            target,
+            motion_fraction,
+        )
         if duration_s <= 0:
+            self._arrive(run)
             handle.finish(outcome)
             return
-        run = _Run(req, handle, duration_s, outcome, self._clock().monotonic())
         self._runs[req.id] = run
         self._arm(run, duration_s)
 
@@ -319,14 +441,16 @@ class FakeExecutor(TaskExecutor):
         if run is None:
             return
         self._disarm(run)
+        self._arrive(run)
         run.handle.finish(run.outcome)
 
     def _tick(self, task_id: str) -> None:
         run = self._runs.get(task_id)
         if run is None or run.paused:
             return
-        elapsed = run.elapsed_before_pause_s + (self._clock().monotonic() - run.started_monotonic)
+        elapsed = self._elapsed(run)
         progress = min(1.0, elapsed / run.duration_s) if run.duration_s > 0 else None
+        self._move_to(self._positions_at(run))
         run.handle.feedback(progress, 'executing', f'{elapsed:.1f} of {run.duration_s:g} s')
         run.ticker = self._scheduler().call_later(
             1.0 / self.feedback_hz, lambda: self._tick(task_id)
@@ -336,8 +460,44 @@ class FakeExecutor(TaskExecutor):
         runs = list(self._runs.values())
         self._runs.clear()
         for run in runs:
+            self._freeze(run)
             self._disarm(run)
         return runs
+
+    # ------------------------------------------------------------------ joints
+
+    def _elapsed(self, run: _Run) -> float:
+        """Seconds of motion so far, pauses excluded."""
+        if run.paused:
+            return run.elapsed_before_pause_s
+        return run.elapsed_before_pause_s + (self._clock().monotonic() - run.started_monotonic)
+
+    def _positions_at(self, run: _Run) -> tuple[float, ...]:
+        """Where the joints are now along ``run``'s motion (unchanged for a holding task)."""
+        if run.target_positions is None:
+            return self._positions
+        progress = 1.0 if run.duration_s <= 0 else min(1.0, self._elapsed(run) / run.duration_s)
+        return interpolate(
+            run.start_positions, run.target_positions, progress * run.motion_fraction
+        )
+
+    def _arrive(self, run: _Run) -> None:
+        """Put the joints where ``run`` ends and report them."""
+        if run.target_positions is not None:
+            self._move_to(
+                interpolate(run.start_positions, run.target_positions, run.motion_fraction)
+            )
+
+    def _freeze(self, run: _Run) -> None:
+        """Leave the joints where the motion was interrupted and report them."""
+        self._move_to(self._positions_at(run))
+
+    def _move_to(self, positions: tuple[float, ...]) -> None:
+        self._positions = positions
+        self._report_joints()
+
+    def _report_joints(self) -> None:
+        self._context().report_joints(self._positions)
 
     # ------------------------------------------------------------------ control tasks
 
@@ -360,6 +520,7 @@ class FakeExecutor(TaskExecutor):
             if run.paused:
                 continue
             remaining = run.completion.remaining_s() if run.completion is not None else 0.0
+            self._freeze(run)
             run.elapsed_before_pause_s += self._clock().monotonic() - run.started_monotonic
             self._disarm(run)
             run.paused_remaining_s = remaining

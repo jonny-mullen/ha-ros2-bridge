@@ -4,17 +4,21 @@
 
 A fake :class:`MoveGroupAdapter` stands in for move_group: the test decides
 when a goal is accepted, what feedback it emits and which
-``MoveItErrorCodes`` value it ends with. The rclpy goal handle is exercised
-with fake futures, and the message builder with fake message classes, so the
-parts that only run on the Isaac machine are at least shape-checked here.
+``MoveItErrorCodes`` value it ends with, and feeds ``JointState`` messages
+for the joint telemetry (0.2.0). The rclpy goal handle is exercised with fake
+futures, and the message builder and the joint-state subscription with fake
+message and node classes, so the parts that only run on the Isaac machine
+are at least shape-checked here.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import sys
+import types
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,9 +29,16 @@ import pytest
 from ros2_ha_bridge import protocol
 from ros2_ha_bridge.authoriser import resolve_request
 from ros2_ha_bridge.executors import moveit
-from ros2_ha_bridge.executors.base import BridgeContext, TaskRejected, TaskRequest, load_executor
+from ros2_ha_bridge.executors.base import (
+    BridgeContext,
+    JointInfo,
+    TaskRejected,
+    TaskRequest,
+    load_executor,
+)
 from ros2_ha_bridge.executors.moveit import (
     DEFAULT_ACTION_NAME,
+    DEFAULT_JOINT_STATES_TOPIC,
     HOME_POSE,
     JOINT_TOLERANCE_RAD,
     MOVEIT_ERROR_CLASSES,
@@ -37,13 +48,15 @@ from ros2_ha_bridge.executors.moveit import (
     STATUS_SUCCEEDED,
     UNAVAILABLE_CODE,
     GoalOutcome,
+    JointStateCallback,
     MoveItExecutor,
     MoveItSettings,
+    announce_joint_names,
     build_goal,
     map_error_code,
     parse_poses,
 )
-from ros2_ha_bridge.protocol import AckPayload, Announce, DecodedCommand
+from ros2_ha_bridge.protocol import AckPayload, Announce, AnnounceJoints, DecodedCommand
 from ros2_ha_bridge.task_manager import TaskManager
 
 from .conftest import assert_imports_without
@@ -135,7 +148,7 @@ class FakeGoalHandle:
 
 
 class FakeAdapter:
-    """:class:`MoveGroupAdapter` double: records goals, lets the test drive them."""
+    """:class:`MoveGroupAdapter` double: records goals, lets the test drive them and feed joint states."""
 
     def __init__(self) -> None:
         self.available = True
@@ -143,6 +156,7 @@ class FakeAdapter:
         self.closed = False
         self.send_raises: Exception | None = None
         self.cancel_raises: Exception | None = None
+        self.joint_state_subscriptions: list[tuple[str, JointStateCallback]] = []
 
     def server_available(self) -> bool:
         return self.available
@@ -154,6 +168,9 @@ class FakeAdapter:
         self.goals.append(handle)
         return handle
 
+    def subscribe_joint_states(self, topic: str, callback: JointStateCallback) -> None:
+        self.joint_state_subscriptions.append((topic, callback))
+
     def close(self) -> None:
         self.closed = True
 
@@ -161,6 +178,32 @@ class FakeAdapter:
     def last(self) -> FakeGoalHandle:
         assert self.goals, 'no goal was sent'
         return self.goals[-1]
+
+    def feed_joint_state(
+        self,
+        names: Sequence[str],
+        positions: Sequence[float],
+        velocities: Sequence[float] | None = None,
+    ) -> None:
+        """Deliver one ``JointState`` to every subscriber, as the rclpy adapter would."""
+        for _, callback in self.joint_state_subscriptions:
+            callback(names, positions, velocities)
+
+
+class AdapterWithoutJointStates:
+    """An older adapter that predates ``subscribe_joint_states``."""
+
+    def __init__(self) -> None:
+        self.inner = FakeAdapter()
+
+    def server_available(self) -> bool:
+        return self.inner.server_available()
+
+    def send_goal(self, goal: dict[str, Any], feedback: Callable[[str], None]) -> FakeGoalHandle:
+        return self.inner.send_goal(goal, feedback)
+
+    def close(self) -> None:
+        self.inner.close()
 
 
 @dataclass(frozen=True)
@@ -184,9 +227,13 @@ class Rig:
     scheduler: FakeScheduler
     parameters: dict[str, Any] = field(default_factory=lambda: dict(PARAMETERS))
     published: list[Published] = field(default_factory=list)
+    #: Every ``ctx.report_joints`` call: (positions, velocities).
+    joints: list[tuple[tuple[float, ...], tuple[float, ...] | None]] = field(default_factory=list)
+    adapter: Any = None
 
     def __post_init__(self) -> None:
-        self.adapter = FakeAdapter()
+        if self.adapter is None:
+            self.adapter = FakeAdapter()
         self.executor = MoveItExecutor(adapter=self.adapter)
         self.manager = TaskManager(
             robot_id=ROBOT,
@@ -199,7 +246,11 @@ class Rig:
             instance=INSTANCE,
         )
         self.executor.setup(
-            self.manager.bridge_context(ha_link_ok=lambda: True, parameters=self.parameters)
+            self.manager.bridge_context(
+                ha_link_ok=lambda: True,
+                parameters=self.parameters,
+                report_joints=self._report_joints,
+            )
         )
         self.specs = {spec.name: spec for spec in self.executor.tasks()}
 
@@ -209,6 +260,11 @@ class Rig:
         wire = protocol.encode_payload(payload)
         self.published.append(Published(topic, json.loads(wire), qos, retain, expiry_s))
         return True
+
+    def _report_joints(
+        self, positions: Sequence[float], velocities: Sequence[float] | None
+    ) -> None:
+        self.joints.append((tuple(positions), None if velocities is None else tuple(velocities)))
 
     def of(self, kind: str) -> list[Published]:
         return [p for p in self.published if p.kind == kind]
@@ -369,7 +425,18 @@ def test_settings_defaults_and_values() -> None:
     assert settings.planning_time_s == 2.5 and settings.num_attempts == 3
     assert settings.velocity_scale == 0.2 and settings.acceleration_scale == 0.3
     assert settings.hold_on_cancel is True and settings.poses_file is None
+    assert settings.joint_states_topic == DEFAULT_JOINT_STATES_TOPIC == '/joint_states'
+    assert settings.joint_names == ()
     assert settings.load_poses() == {'home': HOME, 'rest': REST}
+    custom = MoveItSettings.from_parameters(
+        {
+            **PARAMETERS,
+            'moveit.joint_states_topic': ' /robot/joint_states ',
+            'moveit.joint_names': ['elbow_joint', 'shoulder_pan_joint '],
+        }
+    )
+    assert custom.joint_states_topic == '/robot/joint_states'
+    assert custom.joint_names == ('elbow_joint', 'shoulder_pan_joint')
     minimal = MoveItSettings.from_parameters(
         {'moveit.group_name': 'arm', 'moveit.poses': {'a': {'j': 1}}, 'moveit.num_attempts': 2.0}
     )
@@ -404,6 +471,12 @@ def test_settings_defaults_and_values() -> None:
         ({'moveit.poses': {'home': {' ': 1}}}, 'empty joint'),
         ({'moveit.poses': 'poses.yaml', 'moveit.poses.home.j': 1.0}, 'give one'),
         ({'moveit.poses.home.j': 1.0, 'moveit.poses': {'home': {'j': 1.0}}}, 'give one'),
+        ({'moveit.joint_states_topic': ' '}, 'joint_states_topic'),
+        ({'moveit.joint_states_topic': 3}, 'joint_states_topic'),
+        ({'moveit.joint_names': 'elbow_joint'}, 'joint_names'),
+        ({'moveit.joint_names': ['elbow_joint', 7]}, 'joint_names'),
+        ({'moveit.joint_names': ['elbow_joint', ' ']}, 'joint_names'),
+        ({'moveit.joint_names': ['elbow_joint', 'elbow_joint']}, 'joint_names'),
     ],
 )
 def test_settings_refuse_bad_values(overrides: dict[str, Any], match: str) -> None:
@@ -1111,6 +1184,187 @@ def test_a_new_goal_cancels_a_stale_one_the_bridge_already_forced(
     assert rig.result_of(second)['status'] == 'succeeded'
     stale.complete(-7)
     assert rig.manager.state == 'idle' and len(rig.results) == 3, 'the stale outcome is dropped'
+
+
+# --------------------------------------------------------------------------- joint telemetry
+
+JOINT_STATE_NAMES = [
+    'gripper_finger_joint',
+    'elbow_joint',
+    'shoulder_lift_joint',
+    'shoulder_pan_joint',
+]
+
+
+def test_joints_come_from_the_first_pose_in_radians_without_limits(
+    rig: Rig, schema_validator: Any
+) -> None:
+    info = rig.executor.joints()
+    assert info == JointInfo(
+        names=('shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint'), unit='rad', limits=None
+    )
+    assert rig.executor.joint_names == ('shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint')
+    assert protocol.validate_joint_info(info) == []
+    assert rig.adapter.joint_state_subscriptions[0][0] == '/joint_states'
+    assert len(rig.adapter.joint_state_subscriptions) == 1
+    announce = Announce(
+        robot_id=ROBOT,
+        name='Simulated arm',
+        session=SESSION,
+        instance=INSTANCE,
+        tasks=rig.executor.tasks(),
+        joints=AnnounceJoints.from_joint_info(info, 2.0),
+        ts=0,
+    )
+    schema_validator.assert_valid('announce', announce.to_payload())
+
+
+def test_joint_states_are_forwarded_in_announce_order_with_velocities(rig: Rig) -> None:
+    assert rig.joints == [], 'nothing reported until the first JointState'
+    rig.adapter.feed_joint_state(JOINT_STATE_NAMES, [0.02, 1.5, -1.5, 0.25], [0.0, 0.1, -0.1, 0.5])
+    assert rig.joints == [((0.25, -1.5, 1.5), (0.5, -0.1, 0.1))]
+    rig.adapter.feed_joint_state(JOINT_STATE_NAMES, [0.02, 1.6, -1.4, 0.3], [])
+    assert rig.joints[-1] == ((0.3, -1.4, 1.6), None), 'an empty velocity array means none'
+    rig.adapter.feed_joint_state(JOINT_STATE_NAMES, [0.02, 1.6, -1.4, 0.3], None)
+    assert rig.joints[-1] == ((0.3, -1.4, 1.6), None)
+    rig.adapter.feed_joint_state(JOINT_STATE_NAMES, [0, 1, -1, 2], [1, 2, 3])
+    assert rig.joints[-1] == ((2.0, -1.0, 1.0), None), 'fewer velocities than names: dropped'
+    assert rig.executor.joint_states_seen == 4 and rig.executor.joint_states_skipped == 0
+
+
+def test_joint_state_lacking_a_configured_joint_is_skipped_and_warned_once(
+    rig: Rig, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        rig.adapter.feed_joint_state(['shoulder_pan_joint', 'elbow_joint'], [0.1, 0.2])
+        rig.adapter.feed_joint_state(['shoulder_pan_joint'], [0.1])
+        rig.adapter.feed_joint_state(JOINT_STATE_NAMES, [0.0, 1.0])
+    assert rig.joints == [] and rig.executor.joint_states_skipped == 3
+    warnings = [r for r in caplog.records if 'lacks' in r.getMessage()]
+    assert len(warnings) == 1 and 'shoulder_lift_joint' in warnings[0].getMessage()
+    rig.adapter.feed_joint_state(JOINT_STATE_NAMES, [0.02, 1.5, -1.5, 0.25])
+    assert rig.joints == [((0.25, -1.5, 1.5), None)]
+
+
+def test_joint_names_parameter_overrides_the_pose_order_and_is_announced_cleaned(
+    clock: FakeClock, scheduler: FakeScheduler
+) -> None:
+    rig = make_rig(
+        clock,
+        scheduler,
+        **{
+            'moveit.joint_names': ['elbow_joint', 'Gripper.Finger'],
+            'moveit.joint_states_topic': '/js',
+        },
+    )
+    assert rig.executor.joint_names == ('elbow_joint', 'Gripper.Finger')
+    assert rig.executor.joints() == JointInfo(('elbow_joint', 'gripper_finger'), 'rad', None)
+    assert rig.adapter.joint_state_subscriptions[0][0] == '/js'
+    rig.adapter.feed_joint_state(['Gripper.Finger', 'elbow_joint'], [0.01, 2.0])
+    assert rig.joints == [((2.0, 0.01), None)]
+
+
+def test_joint_names_that_cannot_be_announced_switch_the_telemetry_off(
+    clock: FakeClock, scheduler: FakeScheduler, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        rig = make_rig(clock, scheduler, **{'moveit.joint_names': ['a.b', 'a_b']})
+    assert rig.executor.joints() is None and rig.executor.joint_names == ()
+    assert rig.adapter.joint_state_subscriptions == []
+    assert any('cannot all be announced' in r.getMessage() for r in caplog.records)
+    rig.adapter.feed_joint_state(['a.b', 'a_b'], [1.0, 2.0])
+    assert rig.joints == []
+
+
+@pytest.mark.parametrize(
+    ('raw', 'expected'),
+    [
+        (['shoulder_pan_joint'], ('shoulder_pan_joint',)),
+        (['Gripper.Finger', 'wrist 1'], ('gripper_finger', 'wrist_1')),
+        (['panda_joint1', '2nd_joint'], ('panda_joint1', 'nd_joint')),
+        (['x' * 40], ('x' * 32,)),
+        ([], None),
+        (['j'] * 33, None),
+        (['a.b', 'a_b'], None),
+        (['123'], None),
+        (['___'], None),
+    ],
+)
+def test_announce_joint_names(raw: list[str], expected: tuple[str, ...] | None) -> None:
+    assert announce_joint_names(raw) == expected
+    if expected is not None:
+        assert protocol.validate_joint_info(JointInfo(expected, 'rad')) == []
+
+
+def test_an_adapter_without_joint_states_still_announces_the_joints(
+    clock: FakeClock, scheduler: FakeScheduler, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        rig = Rig(clock, scheduler, dict(PARAMETERS), adapter=AdapterWithoutJointStates())
+    assert rig.executor.joints() is not None
+    assert any('subscribe_joint_states' in r.getMessage() for r in caplog.records)
+    command, _ = rig.run('move_to', {'pose': 'home'})
+    rig.adapter.inner.last.complete(1)
+    assert rig.result_of(command)['status'] == 'succeeded'
+
+
+class FakeNode:
+    """The two subscription methods of ``rclpy.node.Node`` the adapter uses."""
+
+    def __init__(self) -> None:
+        self.subscriptions: list[tuple[Any, str, Callable[[Any], None], Any]] = []
+        self.destroyed: list[Any] = []
+
+    def create_subscription(
+        self, message_cls: Any, topic: str, callback: Callable[[Any], None], qos: Any
+    ) -> Any:
+        subscription = (message_cls, topic, callback, qos)
+        self.subscriptions.append(subscription)
+        return subscription
+
+    def destroy_subscription(self, subscription: Any) -> None:
+        self.destroyed.append(subscription)
+
+
+def test_rclpy_adapter_subscribes_with_the_sensor_qos_and_unpacks_joint_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    joint_state_cls = type('JointState', (), {})
+    sensor_qos = object()
+    sensor_msgs = types.ModuleType('sensor_msgs')
+    sensor_msgs_msg = types.ModuleType('sensor_msgs.msg')
+    sensor_msgs_msg.JointState = joint_state_cls  # type: ignore[attr-defined]
+    rclpy_module = types.ModuleType('rclpy')
+    rclpy_qos = types.ModuleType('rclpy.qos')
+    rclpy_qos.qos_profile_sensor_data = sensor_qos  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, 'sensor_msgs', sensor_msgs)
+    monkeypatch.setitem(sys.modules, 'sensor_msgs.msg', sensor_msgs_msg)
+    monkeypatch.setitem(sys.modules, 'rclpy', rclpy_module)
+    monkeypatch.setitem(sys.modules, 'rclpy.qos', rclpy_qos)
+
+    adapter = moveit.RclpyMoveGroupAdapter.__new__(moveit.RclpyMoveGroupAdapter)
+    node = FakeNode()
+    adapter._node = node
+    adapter._logger = logging.getLogger('test')
+    adapter._joint_states = None
+    adapter._client = SimpleNamespace(destroy=lambda: None)
+    received: list[tuple[Sequence[str], Sequence[float], Sequence[float] | None]] = []
+    adapter.subscribe_joint_states(
+        '/joint_states',
+        lambda names, positions, velocities: received.append((names, positions, velocities)),
+    )
+    ((message_cls, topic, on_message, qos),) = node.subscriptions
+    assert message_cls is joint_state_cls and topic == '/joint_states' and qos is sensor_qos
+    on_message(SimpleNamespace(name=['a', 'b'], position=[1, 2.5], velocity=[0.1, 0.2]))
+    on_message(SimpleNamespace(name=['a', 'b'], position=[1.0, 2.0], velocity=[]))
+    assert received == [
+        (['a', 'b'], [1.0, 2.5], [0.1, 0.2]),
+        (['a', 'b'], [1.0, 2.0], None),
+    ]
+    adapter.subscribe_joint_states('/other', lambda *args: None)
+    assert node.destroyed == [node.subscriptions[0]], 'a second subscribe replaces the first'
+    adapter.close()
+    assert node.destroyed[-1] == node.subscriptions[1] and adapter._joint_states is None
 
 
 # --------------------------------------------------------------------------- the rclpy goal handle

@@ -75,6 +75,7 @@ KIND_BY_SUFFIX = {
     'announce': 'announce',
     'state': 'state',
     'heartbeat': 'heartbeat_robot',
+    'joints': 'joints',
     'ack': 'ack',
     'feedback': 'feedback',
     'result': 'result',
@@ -416,8 +417,11 @@ def test_connect_publishes_retained_availability_announce_and_state(
     subs = {s.filter: s for s in broker.subscriptions_of(CLIENT_ID)}
     assert subs[TOPICS.cmd].qos == 1 and subs[TOPICS.cmd].retain_as_published is True
     assert TOPICS.ha_heartbeat in subs and HA_STATUS in subs
-    order = [r.topic.rsplit('/', 1)[-1] for r in rig.published_by(node)][:3]
-    assert order == ['availability', 'announce', 'state']
+    # The connect burst is ordered: the fake executor reports its starting pose from
+    # ``setup``, and those joints never go out before the retained state.
+    assert rig.spin_until(lambda: len(rig.published_by(node)) >= 4)
+    order = [r.topic.rsplit('/', 1)[-1] for r in rig.published_by(node)][:4]
+    assert order == ['availability', 'announce', 'state', 'joints']
     assert validate_everything(rig, node, schema_validator) >= 3
 
 
@@ -426,6 +430,78 @@ def test_tasks_allow_limits_the_announced_catalogue(rig: Rig) -> None:
     assert rig.connected(node)
     announce = json.loads(rig.broker.retained_payload(TOPICS.announce) or b'null')
     assert [task['name'] for task in announce['tasks']] == ['reset', 'stop']
+
+
+# --------------------------------------------------------------------------- joint telemetry
+
+
+def test_reset_publishes_joint_telemetry_and_the_announce_describes_it(
+    rig: Rig, schema_validator: Any
+) -> None:
+    from ros2_ha_bridge.executors.fake import JOINT_LIMITS, JOINT_NAMES, POSES
+
+    node = rig.node(**FAST, **{'telemetry.joints_rate_hz': 20.0})
+    assert rig.connected(node)
+    assert node.joints_publisher is not None and node.joint_info is not None
+    announce = json.loads(rig.broker.retained_payload(TOPICS.announce) or b'null')
+    schema_validator.assert_valid('announce', announce)
+    assert announce['joints'] == {
+        'unit': 'deg',
+        'names': list(JOINT_NAMES),
+        'limits': [list(pair) for pair in JOINT_LIMITS],
+        'rate_hz': 20.0,
+    }
+    assert announce['tasks'][1]['params']['properties']['pose']['enum'] == list(POSES)
+
+    # The connect burst carries the starting pose once: QoS 0, not retained, 5 s expiry.
+    assert rig.spin_until(lambda: len(rig.published_by(node, 'joints')) >= 1)
+    first = rig.published_by(node, 'joints')[0]
+    assert first.topic == TOPICS.joints and first.qos == 0 and not first.retain
+    assert first.expiry_s == 5
+    assert decode(first)['positions'] == [0.0] * 7 and decode(first)['seq'] == 1
+    assert rig.broker.retained_payload(TOPICS.joints) is None
+    subs = {s.filter: s for s in rig.broker.subscriptions_of(CLIENT_ID)}
+    assert TOPICS.joints not in subs, 'the node publishes joints; it never subscribes to them'
+
+    move_id = send(rig.broker, command('move_to', {'pose': 'pick'}))
+    assert rig.spin_until(lambda: bool(rig.results_for(node, move_id)))
+    rig.spin_for(0.1)
+    assert decode(rig.published_by(node, 'joints')[-1])['positions'] == list(POSES['pick'])
+    before = len(rig.published_by(node, 'joints'))
+
+    reset_id = send(rig.broker, command('reset'))
+    assert rig.spin_until(lambda: bool(rig.results_for(node, reset_id)))
+    rig.spin_for(0.1)
+    joints = [decode(r) for r in rig.published_by(node, 'joints')[before:]]
+    assert len(joints) >= 2, 'a 0.3 s reset at 10 Hz feedback and 20 Hz telemetry'
+    for payload in joints:
+        schema_validator.assert_valid('joints', payload)
+        assert len(payload['positions']) == 7 and payload['velocities'] is None
+        assert payload['session'] == node.session and payload['instance'] == node.instance
+    seqs = [payload['seq'] for payload in joints]
+    assert seqs == sorted(seqs) and len(set(seqs)) == len(seqs), 'seq increases per publication'
+    assert joints[-1]['positions'] == [0.0] * 7, 'the final pose always reaches the wire'
+    assert node.joints_publisher.seq == seqs[-1]
+    assert validate_everything(rig, node, schema_validator) > 5
+
+    # A re-announce republishes the latest positions once, even though nothing moved.
+    count = len(rig.published_by(node, 'joints'))
+    rig.broker.publish(HA_STATUS, b'online', qos=0)
+    assert rig.spin_until(lambda: len(rig.published_by(node, 'announce')) == 2, timeout_s=2.0)
+    assert rig.spin_until(lambda: len(rig.published_by(node, 'joints')) == count + 1)
+    assert decode(rig.published_by(node, 'joints')[-1])['positions'] == [0.0] * 7
+
+
+def test_joint_telemetry_off_omits_the_announce_block_and_publishes_nothing(rig: Rig) -> None:
+    node = rig.node(**FAST, **{'telemetry.joints_rate_hz': 0.0})
+    assert rig.connected(node)
+    assert node.joints_publisher is None and node.joint_info is not None
+    announce = json.loads(rig.broker.retained_payload(TOPICS.announce) or b'null')
+    assert 'joints' not in announce
+    move_id = send(rig.broker, command('move_to', {'pose': 'pick'}))
+    assert rig.spin_until(lambda: bool(rig.results_for(node, move_id)))
+    rig.spin_for(0.1)
+    assert rig.published_by(node, 'joints') == []
 
 
 # --------------------------------------------------------------------------- commands

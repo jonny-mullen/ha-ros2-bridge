@@ -1,6 +1,6 @@
 # Sensors: getting Home Assistant's sensors into ROS 2
 
-Interview decision Q4 asked for two ways of getting sensor events to the robots, because most of the kitchen's sensors are on Zigbee2MQTT and already on the broker, while some may arrive by other protocols. This page describes both paths, the one payload shape the robots can rely on, and how a ROS 2 node reads them.
+Interview decision Q4 asked for two ways of getting sensor events to the robots, because most of the kitchen's sensors are on Zigbee2MQTT and already on the broker, while some may arrive by other protocols. This page describes both paths, the one payload shape the robots can rely on, and how a ROS 2 node reads them. The reverse direction, a robot's joint positions into Home Assistant (added 2026-10-14 towards 0.2.0), is the last section.
 
 | | Fast path | Normalised path |
 |---|---|---|
@@ -208,3 +208,32 @@ The interview's own first scenario (Q1): no motion in the kitchen for five minut
 The robots are discovered through `get_robots`, so nothing names a robot; each send is `wait: none` because the outcome is reported by the speak-back automation in the same file; and `continue_on_error` keeps the loop going when one robot refuses (for example `rejected_busy`). Replace `binary_sensor.kitchen_motion` and `area_id: kitchen` with your own.
 
 The same motion sensor can also be on the fast path at the same time, so that a ROS 2 node reacts to each raw motion event in tens of milliseconds while Home Assistant keeps the five-minute judgement. The two paths coexist; that was the point of Q3.
+
+## The joints path (robot positions into Home Assistant)
+
+The reverse direction, added 2026-10-14 towards 0.2.0 (`docs/decisions.md`, revising interview decision Q17 for a dashboard that shows each arm's articulation): a robot whose announce carries a `joints` block publishes its joint positions on `{prefix}/{robot_id}/joints`, and Home Assistant shows them as one sensor per joint. `docs/mqtt-contract.md` has both payloads; this section is about what arrives in Home Assistant and how to keep it out of the recorder when it is not wanted. `docs/dashboard.md` is the dashboard built on it.
+
+| | |
+|---|---|
+| Topic | `{prefix}/{robot_id}/joints`, QoS 0, never retained, MQTT 5 message expiry 5 s. Only from a node whose announce carries `joints`. |
+| Rate | At most `telemetry.joints_rate_hz` messages per second (default 2; 0 disables the path and the announce omits `joints`), only when a position moved by more than `telemetry.joints_min_delta` since the last publication (default 0.5 for degrees, 0.01 for radians), plus once on every (re)connect and announce. |
+| Entities | One sensor per announced joint: unique id `{robot_id}_joint_{index}` (index from 0), name "Joint {index + 1} {joint name}", unit `°` or `rad` as announced, one decimal in the display, no state class (so nothing enters long-term statistics). Attributes `index`, `joint_name`, `limit_min` and `limit_max` (null when the robot announces no limits). |
+| Availability | Unavailable with the robot, by the same rule as every other entity of the device. A stalled stream alone changes nothing: the sensor keeps its last value. |
+| Lifetime | Created on an announce with `joints`; removed when a later announce drops the joint or the whole key. |
+| Ordering | A payload whose `seq` regresses within a session is dropped, as is one whose number of positions differs from the announced names. |
+| Diagnostics | The latest positions and the joints `seq` per robot. |
+
+Nothing on this path is a safety signal (`docs/safety.md`): a position is a display value with a five-second expiry, never a command input.
+
+### Keeping the joint sensors out of the recorder
+
+The sensors are enabled by default so that the dashboard works without setup. An arm in motion produces up to `rate_hz` state changes per joint per second, each of which the recorder writes to the database and keeps for its purge window (ten days by default). To keep them out of history, exclude them in `configuration.yaml` (the recorder has no UI for this) and restart Home Assistant:
+
+```yaml
+recorder:
+  exclude:
+    entity_globs:
+      - sensor.*_joint_*
+```
+
+The glob matches every joint sensor of every robot; `sensor.left_arm_joint_*` narrows it to one robot. With the exclude in place the sensors still show live values and the gauges of `docs/examples/dashboard.yaml` still move, but its history graph of the joints stays empty and the logbook never lists them. Disabling individual joint sensors on the device page is the other option: a disabled sensor is neither recorded nor shown.

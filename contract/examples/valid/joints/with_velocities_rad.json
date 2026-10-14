@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "robot_id": "arm_left",
+  "positions": [
+    0.0,
+    -1.5708,
+    1.5708,
+    -1.5708,
+    -1.5708,
+    0.0
+  ],
+  "velocities": [
+    0.0,
+    0.0,
+    0.1234,
+    0.0,
+    -0.05,
+    0.0
+  ],
+  "session": "3e7a1c9b-5d2f-4b8e-a1c3-6f0d2e4a8b7c",
+  "instance": "robotpc:4124",
+  "seq": 0,
+  "ts": 1760356801000
+}

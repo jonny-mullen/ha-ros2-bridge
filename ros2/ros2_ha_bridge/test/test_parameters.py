@@ -122,6 +122,10 @@ def test_defaults_match_the_design_table() -> None:
     assert reply.feedback_max_rate_hz == 2.0
     assert reply.retained_rejections_per_minute == 30
     assert settings.heartbeat_interval_s == 2.0
+    telemetry = settings.telemetry
+    assert (telemetry.joints_rate_hz, telemetry.joints_min_delta) == (2.0, 0.0)
+    assert telemetry.joints_enabled
+    assert telemetry.min_delta_for('deg') == 0.5 and telemetry.min_delta_for('rad') == 0.01
     assert (settings.watchdog.mode, settings.watchdog.timeout_s) == ('none', 5.0)
     mirror = settings.mirror
     assert (mirror.topics, mirror.availability_suffix, mirror.ros_topic) == (
@@ -285,6 +289,9 @@ def test_integers_are_accepted_for_doubles_but_not_the_other_way_round() -> None
         ({'reply.feedback_max_rate_hz': -1}, 'reply.feedback_max_rate_hz'),
         ({'reply.retained_rejections_per_minute': -1}, 'reply.retained_rejections_per_minute'),
         ({'heartbeat.interval_s': -1}, 'heartbeat.interval_s'),
+        ({'telemetry.joints_rate_hz': -1}, 'telemetry.joints_rate_hz'),
+        ({'telemetry.joints_rate_hz': 'fast'}, 'telemetry.joints_rate_hz'),
+        ({'telemetry.joints_min_delta': -0.1}, 'telemetry.joints_min_delta'),
         ({'watchdog.mode': 'panic'}, 'watchdog.mode'),
         ({'watchdog.timeout_s': 0}, 'watchdog.timeout_s'),
         ({'mirror.topics': ['a/#/b']}, 'mirror'),
@@ -326,6 +333,18 @@ def test_valid_edge_values_are_accepted() -> None:
     assert settings.mirror.availability_suffix == ''
     assert settings.mirror.topics == ('zigbee2mqtt/+', 'ros2_bridge/ha/sensors/#')
     assert settings.robot.id == 'a' * 32
+
+
+def test_telemetry_rate_zero_disables_and_a_delta_applies_to_both_units() -> None:
+    off = build(**{'telemetry.joints_rate_hz': 0})
+    assert off.telemetry.joints_rate_hz == 0.0 and not off.telemetry.joints_enabled
+    custom = build(**{'telemetry.joints_rate_hz': 10, 'telemetry.joints_min_delta': 0.25})
+    assert custom.telemetry.joints_rate_hz == 10.0 and custom.telemetry.joints_enabled
+    assert custom.telemetry.min_delta_for('deg') == 0.25
+    assert custom.telemetry.min_delta_for('rad') == 0.25
+    assert custom.as_mapping()['telemetry.joints_min_delta'] == 0.25
+    view = executor_parameters(custom)
+    assert view['telemetry.joints_rate_hz'] == 10.0
 
 
 def test_tls_settings_are_carried_through() -> None:

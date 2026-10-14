@@ -1,12 +1,12 @@
 # Quick start
 
-Get ha-ros2-bridge 0.1.0 running in an evening: the Home Assistant integration on a Home Assistant OS box with the Mosquitto add-on, and the ROS 2 package on an Ubuntu 24.04 machine with ROS 2 Jazzy or in Docker, with the shipped `fake` executor so nothing moves. `docs/install-ha.md` and `docs/install-ros2.md` are the full pages; this is the short path.
+Get ha-ros2-bridge running in an evening: the Home Assistant integration on a Home Assistant OS box with the Mosquitto add-on, and the ROS 2 package on an Ubuntu 24.04 machine with ROS 2 Jazzy or in Docker, with the shipped `fake` executor so nothing moves. `docs/install-ha.md` and `docs/install-ros2.md` are the full pages; this is the short path.
 
 ## 1. What you get and what you need
 
 **What you get.**
 
-- One Home Assistant device per robot, built from what the robot announces over MQTT: a state sensor, a last-result sensor, a problem sensor, a task-result event entity, one button per parameterless task and a Cancel task button.
+- One Home Assistant device per robot, built from what the robot announces over MQTT: a state sensor, a last-result sensor, a problem sensor, a task-result event entity, one button per parameterless task and a Cancel task button, and, for a robot that announces its joints, one sensor per joint with the live position (the fake arms announce seven).
 - Three actions (`ros2_bridge.send_task`, `ros2_bridge.cancel_task`, `ros2_bridge.get_robots`), three bus events and two Assist intents, so an automation or a spoken sentence can start a named task and react to its outcome.
 - A ROS 2 node that authorises every command itself and runs it through an executor plugin; the shipped `fake` executor exercises the whole path with no hardware.
 
@@ -189,7 +189,11 @@ data:
 mosquitto_sub -h broker.example.invalid -p 1883 -u changeme -P "$ROS2_HA_BRIDGE_MQTT_PASSWORD" -V 5 -v -t 'ros2_bridge/#'
 ```
 
-A test convenience: the variable exported in step 6 keeps the password out of your shell history; from `tools/`, `docker compose run --rm mqtt` does the same with the `.env` credentials. You see the retained availability, announce and state at once, then a heartbeat every 2 s, and on each command the ack, `busy`, feedback, the result and `idle`.
+A test convenience: the variable exported in step 6 keeps the password out of your shell history; from `tools/`, `docker compose run --rm mqtt` does the same with the `.env` credentials. You see the retained availability, announce and state at once, then the first `joints` message (0.2.0, the fake arm's home pose), then a heartbeat every 2 s, and on each command the ack, `busy`, feedback, `joints` while the arm moves, the result and `idle`.
+
+### Joints and the dashboard
+
+Each fake arm announces seven joints (`j1` to `j7`, degrees), so each device also gets `sensor.fake_arm_1_joint_1_j1` to `sensor.fake_arm_1_joint_7_j7`, updated at up to 2 Hz while a task moves them and holding between tasks; each carries its limits as attributes. `docs/examples/dashboard.yaml` is a ready-made dashboard for the two fake arms (an Overview plus one view per arm with the seven joint gauges, the task buttons, a history graph and the result log): Settings, Dashboards, Add dashboard, open its raw configuration editor and paste the file in; `docs/dashboard.md` explains it and how to adapt it to other robots. Joint sensors update often, so `docs/sensors.md` shows the recorder exclude to keep them out of long-term history.
 
 ## 5. How communication works
 

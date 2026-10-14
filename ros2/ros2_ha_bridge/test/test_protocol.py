@@ -27,17 +27,20 @@ from typing import Any
 import pytest
 
 from ros2_ha_bridge import protocol
-from ros2_ha_bridge.executors.base import TaskSpec
+from ros2_ha_bridge.executors.base import JointInfo, TaskSpec
 from ros2_ha_bridge.protocol import (
     ACK_CODES,
     COMMAND_TYPES,
     DEFAULT_PREFIX,
+    JOINT_UNITS,
+    MAX_ANNOUNCE_BYTES,
     MAX_PAYLOAD_BYTES,
     RESULT_STATUSES,
     STATES,
     TASK_KINDS,
     AckPayload,
     Announce,
+    AnnounceJoints,
     Capabilities,
     Counters,
     DecodedCommand,
@@ -47,6 +50,7 @@ from ros2_ha_bridge.protocol import (
     FeedbackPayload,
     HaHeartbeat,
     HeartbeatPayload,
+    JointsPayload,
     ResultPayload,
     RobotError,
     RobotTopics,
@@ -126,6 +130,8 @@ def test_closed_sets_match_the_contract() -> None:
     assert TASK_KINDS == ('motion', 'control', 'query')
     assert STATES == ('idle', 'busy', 'error')
     assert COMMAND_TYPES == ('task', 'cancel')
+    assert JOINT_UNITS == ('deg', 'rad')
+    assert protocol.MAX_JOINTS == 32 and protocol.JOINTS_EXPIRY_S == 5
     assert protocol.COUNTER_NAMES == (
         'accepted',
         'rejected',
@@ -425,6 +431,24 @@ def test_golden_example_validates_against_vendored_schema(
         schema_validator.assert_invalid(
             golden_example.kind, dict(golden_example.payload, schema=2)
         )
+
+
+def test_invalid_announce_example_is_refused(
+    invalid_announce_example: Any, schema_validator: Any
+) -> None:
+    """Every must-reject announce fails the schema, except the oversize one, which fails on size."""
+    payload = invalid_announce_example.payload
+    if invalid_announce_example.name.startswith('oversize'):
+        schema_validator.assert_valid('announce', payload)
+        assert len(protocol.encode_payload(payload)) > MAX_ANNOUNCE_BYTES
+    else:
+        schema_validator.assert_invalid('announce', payload)
+
+
+def test_invalid_joints_example_is_refused(
+    invalid_joints_example: Any, schema_validator: Any
+) -> None:
+    schema_validator.assert_invalid('joints', invalid_joints_example.payload)
 
 
 def test_ack_payloads_match_golden_examples(valid_examples: Any, schema_validator: Any) -> None:
@@ -730,7 +754,10 @@ def test_feedback_payloads_match_golden_examples(
         schema_validator.assert_valid('feedback', payload)
 
 
-def _full_catalogue_tasks() -> list[TaskSpec]:
+def _full_catalogue_tasks(pose_enum: list[str] | None = None) -> list[TaskSpec]:
+    pose: dict[str, Any] = {'type': 'string'}
+    if pose_enum is not None:
+        pose['enum'] = pose_enum
     return [
         TaskSpec('reset', 'Reset to home', 'motion', 60),
         TaskSpec('stop', 'Stop', 'control', 5),
@@ -741,9 +768,21 @@ def _full_catalogue_tasks() -> list[TaskSpec]:
             'Move to named pose',
             'motion',
             120,
-            {'type': 'object', 'properties': {'pose': {'type': 'string'}}, 'required': ['pose']},
+            {'type': 'object', 'properties': {'pose': pose}, 'required': ['pose']},
         ),
     ]
+
+
+SEVEN_JOINTS = ('j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7')
+SEVEN_LIMITS = (
+    (-170.0, 170.0),
+    (-170.0, 170.0),
+    (-170.0, 170.0),
+    (-120.0, 120.0),
+    (-170.0, 170.0),
+    (-120.0, 120.0),
+    (-170.0, 170.0),
+)
 
 
 def test_announce_matches_golden_examples(valid_examples: Any, schema_validator: Any) -> None:
@@ -763,6 +802,24 @@ def test_announce_matches_golden_examples(valid_examples: Any, schema_validator:
         ts=1760356800000,
     )
     assert full.to_payload() == golden['full_catalogue'].payload
+    with_joints = Announce(
+        robot_id='fake_arm_1',
+        name='Fake arm 1',
+        model='fake seven-joint arm',
+        suggested_area='Workshop',
+        bridge_version='0.2.0',
+        executor=ExecutorInfo('fake', '0.2.0'),
+        session=SESSION,
+        instance=INSTANCE,
+        tasks=_full_catalogue_tasks(['home', 'pick', 'place', 'wave']),
+        joints=AnnounceJoints.from_joint_info(
+            JointInfo(names=SEVEN_JOINTS, unit='deg', limits=SEVEN_LIMITS), rate_hz=2.0
+        ),
+        ts=1760356800000,
+    )
+    assert with_joints.to_payload() == golden['with_joints'].payload
+    assert list(with_joints.to_payload())[-2:] == ['joints', 'ts'], 'joints sits before ts'
+    assert 'joints' not in full.to_payload(), 'a robot without joints omits the key'
     minimal = Announce(
         robot_id='arm_right',
         name='Right arm',
@@ -822,14 +879,126 @@ def test_announce_matches_golden_examples(valid_examples: Any, schema_validator:
         'full_catalogue',
         'minimal_required_fields',
         'params_with_enum_and_range',
+        'with_joints',
     }
-    for announce in (full, minimal, gripper):
+    for announce in (full, minimal, gripper, with_joints):
         payload = announce.to_payload()
         schema_validator.assert_valid('announce', payload)
         assert len(protocol.encode_payload(payload)) <= protocol.MAX_ANNOUNCE_BYTES
         for spec in announce.tasks:
             assert protocol.validate_task_spec(spec) == []
     assert Announce.__dataclass_fields__['bridge_version'].default == protocol.__version__
+
+
+def test_joints_payloads_match_golden_examples(valid_examples: Any, schema_validator: Any) -> None:
+    golden = valid_examples('joints')
+    cases = {
+        'seven_joints_deg': JointsPayload(
+            robot_id='fake_arm_1',
+            positions=[12.5, -34.0, 90.25, -45.5, 0.0, 60.75, -10.0],
+            velocities=None,
+            session=SESSION,
+            instance=INSTANCE,
+            seq=7,
+            ts=1760356803500,
+        ),
+        'with_velocities_rad': JointsPayload(
+            robot_id=ROBOT,
+            positions=(0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0),
+            velocities=(0.0, 0.0, 0.1234, 0.0, -0.05, 0.0),
+            session='3e7a1c9b-5d2f-4b8e-a1c3-6f0d2e4a8b7c',
+            instance='robotpc:4124',
+            seq=0,
+            ts=1760356801000,
+        ),
+    }
+    assert set(cases) == set(golden), 'a golden joints example has no mirror in this test'
+    for name, joints in cases.items():
+        payload = joints.to_payload()
+        assert payload == golden[name].payload, name
+        schema_validator.assert_valid('joints', payload)
+        assert len(protocol.encode_payload(payload)) <= MAX_PAYLOAD_BYTES
+        assert all(isinstance(value, float) for value in payload['positions'])
+    schema_validator.assert_invalid('joints', dict(cases['seven_joints_deg'].to_payload(), seq=-1))
+    schema_validator.assert_invalid(
+        'joints', dict(cases['seven_joints_deg'].to_payload(), positions=[])
+    )
+    schema_validator.assert_invalid(
+        'joints', dict(cases['seven_joints_deg'].to_payload(), positions=[0.0] * 33)
+    )
+
+
+def test_announce_joints_block_follows_the_schema(schema_validator: Any) -> None:
+    info = JointInfo(names=SEVEN_JOINTS, unit='deg', limits=SEVEN_LIMITS)
+    block = AnnounceJoints.from_joint_info(info, 2)
+    assert block.to_payload() == {
+        'unit': 'deg',
+        'names': list(SEVEN_JOINTS),
+        'limits': [list(pair) for pair in SEVEN_LIMITS],
+        'rate_hz': 2.0,
+    }
+    no_limits = AnnounceJoints.from_joint_info(JointInfo(('a', 'b'), 'rad'), 0.5)
+    assert no_limits.to_payload() == {
+        'unit': 'rad',
+        'names': ['a', 'b'],
+        'limits': None,
+        'rate_hz': 0.5,
+    }
+
+    def announce(block: AnnounceJoints) -> dict[str, Any]:
+        return Announce(
+            robot_id=ROBOT,
+            name='x',
+            session=SESSION,
+            instance=INSTANCE,
+            tasks=[],
+            joints=block,
+            ts=0,
+        ).to_payload()
+
+    schema_validator.assert_valid('announce', announce(block))
+    schema_validator.assert_valid('announce', announce(no_limits))
+    schema_validator.assert_invalid(
+        'announce', announce(AnnounceJoints('deg', SEVEN_JOINTS, None, 0))
+    )
+    schema_validator.assert_invalid('announce', announce(AnnounceJoints('deg', (), None, 2.0)))
+    schema_validator.assert_invalid(
+        'announce',
+        announce(AnnounceJoints('turns', SEVEN_JOINTS, None, 2.0)),  # type: ignore[arg-type]
+    )
+    schema_validator.assert_invalid(
+        'announce', announce(AnnounceJoints('deg', ('J1',), None, 2.0))
+    )
+
+
+@pytest.mark.parametrize(
+    ('info', 'fragment'),
+    [
+        (JointInfo(SEVEN_JOINTS, 'deg', SEVEN_LIMITS), None),
+        (JointInfo(('j1',), 'rad', None), None),
+        (JointInfo(['shoulder_pan_joint', 'elbow_joint'], 'rad', [(-3.14, 3.14), (0, 2)]), None),
+        (JointInfo((), 'deg', None), 'between 1 and 32'),
+        (JointInfo(tuple(f'j{i}' for i in range(33)), 'deg', None), 'between 1 and 32'),
+        (JointInfo(('J1',), 'deg', None), 'must match'),
+        (JointInfo(('1j',), 'deg', None), 'must match'),
+        (JointInfo(('j1', 'j1'), 'deg', None), 'distinct'),
+        (JointInfo(('j1',), 'turns', None), 'unit'),  # type: ignore[arg-type]
+        (JointInfo(('j1', 'j2'), 'deg', ((-1, 1),)), 'one pair per name'),
+        (JointInfo(('j1',), 'deg', ((1, -1),)), 'above maximum'),
+        (JointInfo(('j1',), 'deg', ((-1, 'x'),)), 'pair of finite numbers'),  # type: ignore[list-item]
+        (JointInfo(('j1',), 'deg', ((-1,),)), 'pair of finite numbers'),  # type: ignore[list-item]
+        (JointInfo(('j1',), 'deg', ((-1, float('nan')),)), 'pair of finite numbers'),
+        (JointInfo('j1', 'deg', None), 'list of strings'),
+        (JointInfo(('j1',), 'deg', 'wide'), 'null or a list'),  # type: ignore[arg-type]
+    ],
+)
+def test_validate_joint_info(info: JointInfo, fragment: str | None) -> None:
+    errors = protocol.validate_joint_info(info)
+    if fragment is None:
+        assert errors == []
+        assert info.count == len(info.names)
+    else:
+        assert errors and fragment in errors[0], errors
 
 
 # --------------------------------------------------------------------------- topics
@@ -842,6 +1011,7 @@ def test_topic_builders_follow_the_topic_table() -> None:
     )
     assert protocol.state_topic(DEFAULT_PREFIX, ROBOT) == 'ros2_bridge/arm_left/state'
     assert protocol.heartbeat_topic(DEFAULT_PREFIX, ROBOT) == 'ros2_bridge/arm_left/heartbeat'
+    assert protocol.joints_topic(DEFAULT_PREFIX, ROBOT) == 'ros2_bridge/arm_left/joints'
     assert protocol.cmd_topic(DEFAULT_PREFIX, ROBOT) == 'ros2_bridge/arm_left/cmd'
     assert protocol.ack_topic('lab', ROBOT, TASK_ID) == f'lab/arm_left/task/{TASK_ID}/ack'
     assert (
@@ -859,6 +1029,7 @@ def test_topic_builders_follow_the_topic_table() -> None:
     assert topics.availability == 'ros2_bridge/arm_left/availability'
     assert topics.state == 'ros2_bridge/arm_left/state'
     assert topics.heartbeat == 'ros2_bridge/arm_left/heartbeat'
+    assert topics.joints == 'ros2_bridge/arm_left/joints'
     assert topics.cmd == 'ros2_bridge/arm_left/cmd'
     assert topics.ha_heartbeat == 'ros2_bridge/ha/heartbeat'
     assert topics.ack(TASK_ID) == f'ros2_bridge/arm_left/task/{TASK_ID}/ack'
@@ -926,6 +1097,8 @@ def test_bad_robot_ids_are_refused(robot_id: str) -> None:
         protocol.validate_robot_id(robot_id)
     with pytest.raises(ValueError):
         protocol.state_topic(DEFAULT_PREFIX, robot_id)
+    with pytest.raises(ValueError):
+        protocol.joints_topic(DEFAULT_PREFIX, robot_id)
     with pytest.raises(ValueError):
         RobotTopics(robot_id)
     assert protocol.is_valid_robot_id('a' * 32)

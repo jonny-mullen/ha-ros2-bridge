@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ha-ros2-bridge.invalid/contract/1/announce.schema.json",
   "title": "announce",
-  "description": "Topic {prefix}/{robot_id}/announce, ROS to HA, QoS 1, retained, no expiry. Identity plus the task catalogue. An empty retained payload is a tombstone and is not a JSON document. Republished on connect, on HA birth and on catalogue change. Size limit 64 KiB.",
+  "description": "Topic {prefix}/{robot_id}/announce, ROS to HA, QoS 1, retained, no expiry. Identity plus the task catalogue and, since 0.2.0, an optional joints block describing the joint telemetry published on {prefix}/{robot_id}/joints. An empty retained payload is a tombstone and is not a JSON document. Republished on connect, on HA birth and on catalogue change. Size limit 64 KiB.",
   "type": "object",
   "properties": {
     "schema": {
@@ -92,6 +92,10 @@
         "$ref": "#/$defs/task_spec"
       }
     },
+    "joints": {
+      "description": "Optional (added 2026-10-14, 0.2.0). Describes the joint telemetry the node publishes on {prefix}/{robot_id}/joints. Absent when the executor reports no joints or telemetry.joints_rate_hz is 0; HA then creates no joint sensors and removes any it made from an earlier announce.",
+      "$ref": "#/$defs/joints"
+    },
     "ts": {
       "$ref": "common.schema.json#/$defs/epoch_ms"
     }
@@ -146,6 +150,41 @@
         }
       },
       "required": ["name", "label", "kind", "timeout_s", "params"],
+      "additionalProperties": true
+    },
+    "joints": {
+      "type": "object",
+      "properties": {
+        "unit": {
+          "$ref": "common.schema.json#/$defs/joint_unit"
+        },
+        "names": {
+          "description": "The joint names in publication order; positions on the joints topic follow this order. One to 32 names.",
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/joint_name"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        },
+        "limits": {
+          "description": "null when the executor knows no limits, otherwise one [minimum, maximum] pair per name in the announced unit.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "common.schema.json#/$defs/joint_limits"
+            }
+          ]
+        },
+        "rate_hz": {
+          "description": "The node's maximum publish rate on the joints topic in messages per second (telemetry.joints_rate_hz, default 2). Greater than 0; a node with the rate set to 0 omits the whole joints block.",
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "required": ["unit", "names", "limits", "rate_hz"],
       "additionalProperties": true
     }
   }

@@ -51,6 +51,8 @@ python scripts/validate_contract.py
 python scripts/sync_contract.py --check
 ```
 
+`check_versions.py` lets the code run ahead of `CHANGELOG.md` between releases: when the five version strings agree on a version newer than the last release heading and there is an entry under `## [Unreleased]`, it reports the heading as the last release and passes. `release.yml` runs it with `--expect` and `--released`, which insist on a `## [X.Y.Z]` heading for the tag, so the heading is added when the release is cut, not before.
+
 The rclpy-free ROS 2 core tests and the contract tests run on any Python 3.12 or newer. The HA suite needs Python 3.14 and runs natively on Linux (CI, the `ha-tests` container or WSL2); on a Windows PC run it through `tools/windows_test_shim` (see its README). The full ROS 2 suite runs under `colcon test` in the `ros:jazzy-ros-base` container via `tools/compose.yaml`. `pre-commit run --all-files` runs the fast subset.
 
 ## Decision log rule

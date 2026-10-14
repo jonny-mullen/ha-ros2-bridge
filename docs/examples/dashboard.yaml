@@ -1,0 +1,732 @@
+# ROS 2 Bridge example dashboard: the two fake arms (fake_arm_1 and fake_arm_2) of tools/compose.yaml.
+#
+# What it is: a complete Lovelace dashboard (top-level "views:") in the sections layout, phone first, native
+# cards only. One Overview view with both arms, then one view per arm with its status, the seven joint
+# gauges, the task buttons, a 30-minute history graph and the task-result logbook. docs/dashboard.md explains
+# each view and the gauge limits.
+#
+# How to install it (Home Assistant 2026.10 or newer):
+#   1. Settings, Dashboards, Add dashboard, "New dashboard from scratch". Title "Robot arms", Create.
+#   2. Open the new dashboard and press the pencil (Edit dashboard) at the top right.
+#   3. Three-dot menu at the top right, "Raw configuration editor".
+#   4. Delete whatever the editor shows, paste this whole file, Save, close the editor, Done.
+#   Copy an existing dashboard's raw configuration out before pasting over it.
+#
+# How to adapt it to other robots:
+#   - Entity ids come from the device name Home Assistant builds from the announce, not from the robot id:
+#     a robot announced as "Left arm" gets sensor.left_arm_state, button.left_arm_reset_to_home and
+#     sensor.left_arm_joint_1_<name>. Check the ids on the device page, then replace fake_arm_1 and
+#     fake_arm_2 throughout, and "Fake arm 1" and "Fake arm 2" in the headings and view titles. The pose
+#     buttons are the exception: ros2_bridge.send_task takes the robot id (robot_id).
+#   - Joints: one gauge and one history-graph entry per announced joint. The sensors are numbered from 1
+#     in the announced order and carry the joint name after the number. Add or delete gauges to match.
+#   - Gauge limits are static values copied from the announced limits (fake executor: -170 to 170
+#     degrees, j4 and j6 -120 to 120). Each joint sensor carries its own limit_min and limit_max
+#     attributes. Change min, max and the amber bands (segments) to match your arm, and the history
+#     graph's axis. A robot that announces no limits needs a range of your choosing.
+#   - The task buttons press the button entities the integration creates (one per parameterless task
+#     plus Cancel task). The pose buttons call ros2_bridge.send_task with move_to and a pose name the
+#     fake executor accepts (pick, place, wave; reset returns home). Rename or remove them for a robot
+#     whose poses differ. Buttons for the fake test tasks Hang, Raise error and Clear error are left out.
+#   - A third arm: copy one arm's block in the Overview and one whole arm view, then replace ids and names.
+#
+# Entity ids, checked against the integration's strings on 2026-10-14: the joint sensors are named
+# "Joint 1 j1" to "Joint 7 j7" and ids are built device name first, lower case, spaces to underscores, so they
+# are sensor.fake_arm_1_joint_1_j1 to sensor.fake_arm_1_joint_7_j7, and the same for fake_arm_2. Home Assistant
+# appends a number when an id is already taken, so confirm on the device page after the first announce.
+# YAML anchors (&band_170) and aliases (*band_170) carry the repeated gauge bands; Home Assistant expands
+# them when the dashboard is saved, so the stored configuration holds plain values.
+# The history graph uses hours_to_show: 0.5 (30 minutes). The card's visual editor only offers whole hours,
+# so change that value here or in the raw configuration editor, not in the card editor.
+title: Robot arms
+views:
+  # Overview: both arms at a glance. The two sections stack on a phone and sit side by side on a tablet.
+  - title: Overview
+    path: overview
+    type: sections
+    max_columns: 2
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Fake arm 1
+            heading_style: title
+            icon: mdi:robot-industrial
+            badges:
+              # Shown only while the problem sensor is on.
+              - type: entity
+                entity: binary_sensor.fake_arm_1_problem
+                show_state: true
+                show_icon: true
+                color: red
+                visibility:
+                  - condition: state
+                    entity: binary_sensor.fake_arm_1_problem
+                    state: "on"
+          - type: tile
+            entity: sensor.fake_arm_1_state
+            name: State
+            state_content:
+              - state
+              - last_changed
+            grid_options:
+              columns: 12
+              rows: 1
+          # Reset, Stop, Pause, Resume and Cancel press the integration's button entities.
+          - type: grid
+            columns: 5
+            square: false
+            cards:
+              - type: button
+                entity: button.fake_arm_1_reset_to_home
+                name: Reset
+                icon: mdi:home-import-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_reset_to_home
+              - type: button
+                entity: button.fake_arm_1_stop
+                name: Stop
+                icon: mdi:stop-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_stop
+              - type: button
+                entity: button.fake_arm_1_pause
+                name: Pause
+                icon: mdi:pause-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_pause
+              - type: button
+                entity: button.fake_arm_1_resume
+                name: Resume
+                icon: mdi:play-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_resume
+              - type: button
+                entity: button.fake_arm_1_cancel_task
+                name: Cancel
+                icon: mdi:cancel
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_cancel_task
+          - type: tile
+            entity: sensor.fake_arm_1_last_result
+            name: Last result
+            state_content:
+              - state
+              - last_changed
+            grid_options:
+              columns: 12
+              rows: 1
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Fake arm 2
+            heading_style: title
+            icon: mdi:robot-industrial
+            badges:
+              # Shown only while the problem sensor is on.
+              - type: entity
+                entity: binary_sensor.fake_arm_2_problem
+                show_state: true
+                show_icon: true
+                color: red
+                visibility:
+                  - condition: state
+                    entity: binary_sensor.fake_arm_2_problem
+                    state: "on"
+          - type: tile
+            entity: sensor.fake_arm_2_state
+            name: State
+            state_content:
+              - state
+              - last_changed
+            grid_options:
+              columns: 12
+              rows: 1
+          # Reset, Stop, Pause, Resume and Cancel press the integration's button entities.
+          - type: grid
+            columns: 5
+            square: false
+            cards:
+              - type: button
+                entity: button.fake_arm_2_reset_to_home
+                name: Reset
+                icon: mdi:home-import-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_reset_to_home
+              - type: button
+                entity: button.fake_arm_2_stop
+                name: Stop
+                icon: mdi:stop-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_stop
+              - type: button
+                entity: button.fake_arm_2_pause
+                name: Pause
+                icon: mdi:pause-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_pause
+              - type: button
+                entity: button.fake_arm_2_resume
+                name: Resume
+                icon: mdi:play-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_resume
+              - type: button
+                entity: button.fake_arm_2_cancel_task
+                name: Cancel
+                icon: mdi:cancel
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_cancel_task
+          - type: tile
+            entity: sensor.fake_arm_2_last_result
+            name: Last result
+            state_content:
+              - state
+              - last_changed
+            grid_options:
+              columns: 12
+              rows: 1
+  # Fake arm 1: status, the seven joints, the task buttons, the last 30 minutes and the results.
+  - title: Fake arm 1
+    path: fake-arm-1
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Status
+            heading_style: title
+            badges:
+              # Shown only while the problem sensor is on.
+              - type: entity
+                entity: binary_sensor.fake_arm_1_problem
+                show_state: true
+                show_icon: true
+                color: red
+                visibility:
+                  - condition: state
+                    entity: binary_sensor.fake_arm_1_problem
+                    state: "on"
+          - type: tile
+            entity: sensor.fake_arm_1_state
+            name: State
+            state_content:
+              - state
+              - last_changed
+            grid_options:
+              columns: 12
+              rows: 1
+          - type: tile
+            entity: sensor.fake_arm_1_last_result
+            name: Last result
+            state_content:
+              - state
+              - last_changed
+          - type: tile
+            entity: binary_sensor.fake_arm_1_problem
+            name: Problem
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Joints
+            heading_style: title
+            icon: mdi:axis-arrow
+          # One gauge per joint, two per row on a phone (columns: 6 of the section's 12). min and max are the
+          # announced limits in degrees; the amber bands mark the outer 20 degrees (15 for j4 and j6).
+          - type: gauge
+            entity: sensor.fake_arm_1_joint_1_j1
+            name: J1
+            min: -170
+            max: 170
+            needle: true
+            segments: &band_170
+              - from: -170
+                color: var(--warning-color)
+              - from: -150
+                color: var(--info-color)
+              - from: 150
+                color: var(--warning-color)
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_1_joint_2_j2
+            name: J2
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_1_joint_3_j3
+            name: J3
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_1_joint_4_j4
+            name: J4
+            min: -120
+            max: 120
+            needle: true
+            segments: &band_120
+              - from: -120
+                color: var(--warning-color)
+              - from: -105
+                color: var(--info-color)
+              - from: 105
+                color: var(--warning-color)
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_1_joint_5_j5
+            name: J5
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_1_joint_6_j6
+            name: J6
+            min: -120
+            max: 120
+            needle: true
+            segments: *band_120
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_1_joint_7_j7
+            name: J7
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Tasks
+            heading_style: title
+            icon: mdi:play-box-outline
+          # Reset, Stop, Pause, Resume and Cancel press the integration's button entities.
+          - type: grid
+            columns: 5
+            square: false
+            cards:
+              - type: button
+                entity: button.fake_arm_1_reset_to_home
+                name: Reset
+                icon: mdi:home-import-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_reset_to_home
+              - type: button
+                entity: button.fake_arm_1_stop
+                name: Stop
+                icon: mdi:stop-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_stop
+              - type: button
+                entity: button.fake_arm_1_pause
+                name: Pause
+                icon: mdi:pause-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_pause
+              - type: button
+                entity: button.fake_arm_1_resume
+                name: Resume
+                icon: mdi:play-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_resume
+              - type: button
+                entity: button.fake_arm_1_cancel_task
+                name: Cancel
+                icon: mdi:cancel
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_1_cancel_task
+          - type: heading
+            heading: Named poses
+            heading_style: subtitle
+          # Named poses of the fake executor through ros2_bridge.send_task (waits for the acknowledgement;
+          # a refusal, for example rejected_busy, is shown as an error).
+          - type: grid
+            columns: 3
+            square: false
+            cards:
+              - type: button
+                name: Pick
+                icon: mdi:tray-arrow-down
+                tap_action:
+                  action: perform-action
+                  perform_action: ros2_bridge.send_task
+                  data:
+                    robot_id: fake_arm_1
+                    task: move_to
+                    params:
+                      pose: pick
+              - type: button
+                name: Place
+                icon: mdi:tray-arrow-up
+                tap_action:
+                  action: perform-action
+                  perform_action: ros2_bridge.send_task
+                  data:
+                    robot_id: fake_arm_1
+                    task: move_to
+                    params:
+                      pose: place
+              - type: button
+                name: Wave
+                icon: mdi:hand-wave-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: ros2_bridge.send_task
+                  data:
+                    robot_id: fake_arm_1
+                    task: move_to
+                    params:
+                      pose: wave
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Last 30 minutes
+            heading_style: title
+            icon: mdi:chart-line
+          # Needs the joint sensors in the recorder (docs/sensors.md shows the exclude that would empty this).
+          - type: history-graph
+            hours_to_show: 0.5
+            min_y_axis: -170
+            max_y_axis: 170
+            entities:
+              - entity: sensor.fake_arm_1_joint_1_j1
+                name: J1
+              - entity: sensor.fake_arm_1_joint_2_j2
+                name: J2
+              - entity: sensor.fake_arm_1_joint_3_j3
+                name: J3
+              - entity: sensor.fake_arm_1_joint_4_j4
+                name: J4
+              - entity: sensor.fake_arm_1_joint_5_j5
+                name: J5
+              - entity: sensor.fake_arm_1_joint_6_j6
+                name: J6
+              - entity: sensor.fake_arm_1_joint_7_j7
+                name: J7
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Task results
+            heading_style: title
+            icon: mdi:flag-checkered
+          - type: logbook
+            entities:
+              - event.fake_arm_1_task_result
+            hours_to_show: 24
+  # Fake arm 2: status, the seven joints, the task buttons, the last 30 minutes and the results.
+  - title: Fake arm 2
+    path: fake-arm-2
+    type: sections
+    max_columns: 3
+    sections:
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Status
+            heading_style: title
+            badges:
+              # Shown only while the problem sensor is on.
+              - type: entity
+                entity: binary_sensor.fake_arm_2_problem
+                show_state: true
+                show_icon: true
+                color: red
+                visibility:
+                  - condition: state
+                    entity: binary_sensor.fake_arm_2_problem
+                    state: "on"
+          - type: tile
+            entity: sensor.fake_arm_2_state
+            name: State
+            state_content:
+              - state
+              - last_changed
+            grid_options:
+              columns: 12
+              rows: 1
+          - type: tile
+            entity: sensor.fake_arm_2_last_result
+            name: Last result
+            state_content:
+              - state
+              - last_changed
+          - type: tile
+            entity: binary_sensor.fake_arm_2_problem
+            name: Problem
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Joints
+            heading_style: title
+            icon: mdi:axis-arrow
+          # One gauge per joint, two per row on a phone (columns: 6 of the section's 12). min and max are the
+          # announced limits in degrees; the amber bands mark the outer 20 degrees (15 for j4 and j6).
+          - type: gauge
+            entity: sensor.fake_arm_2_joint_1_j1
+            name: J1
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_2_joint_2_j2
+            name: J2
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_2_joint_3_j3
+            name: J3
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_2_joint_4_j4
+            name: J4
+            min: -120
+            max: 120
+            needle: true
+            segments: *band_120
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_2_joint_5_j5
+            name: J5
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_2_joint_6_j6
+            name: J6
+            min: -120
+            max: 120
+            needle: true
+            segments: *band_120
+            grid_options:
+              columns: 6
+          - type: gauge
+            entity: sensor.fake_arm_2_joint_7_j7
+            name: J7
+            min: -170
+            max: 170
+            needle: true
+            segments: *band_170
+            grid_options:
+              columns: 6
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Tasks
+            heading_style: title
+            icon: mdi:play-box-outline
+          # Reset, Stop, Pause, Resume and Cancel press the integration's button entities.
+          - type: grid
+            columns: 5
+            square: false
+            cards:
+              - type: button
+                entity: button.fake_arm_2_reset_to_home
+                name: Reset
+                icon: mdi:home-import-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_reset_to_home
+              - type: button
+                entity: button.fake_arm_2_stop
+                name: Stop
+                icon: mdi:stop-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_stop
+              - type: button
+                entity: button.fake_arm_2_pause
+                name: Pause
+                icon: mdi:pause-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_pause
+              - type: button
+                entity: button.fake_arm_2_resume
+                name: Resume
+                icon: mdi:play-circle-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_resume
+              - type: button
+                entity: button.fake_arm_2_cancel_task
+                name: Cancel
+                icon: mdi:cancel
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.fake_arm_2_cancel_task
+          - type: heading
+            heading: Named poses
+            heading_style: subtitle
+          # Named poses of the fake executor through ros2_bridge.send_task (waits for the acknowledgement;
+          # a refusal, for example rejected_busy, is shown as an error).
+          - type: grid
+            columns: 3
+            square: false
+            cards:
+              - type: button
+                name: Pick
+                icon: mdi:tray-arrow-down
+                tap_action:
+                  action: perform-action
+                  perform_action: ros2_bridge.send_task
+                  data:
+                    robot_id: fake_arm_2
+                    task: move_to
+                    params:
+                      pose: pick
+              - type: button
+                name: Place
+                icon: mdi:tray-arrow-up
+                tap_action:
+                  action: perform-action
+                  perform_action: ros2_bridge.send_task
+                  data:
+                    robot_id: fake_arm_2
+                    task: move_to
+                    params:
+                      pose: place
+              - type: button
+                name: Wave
+                icon: mdi:hand-wave-outline
+                tap_action:
+                  action: perform-action
+                  perform_action: ros2_bridge.send_task
+                  data:
+                    robot_id: fake_arm_2
+                    task: move_to
+                    params:
+                      pose: wave
+      - type: grid
+        column_span: 2
+        cards:
+          - type: heading
+            heading: Last 30 minutes
+            heading_style: title
+            icon: mdi:chart-line
+          # Needs the joint sensors in the recorder (docs/sensors.md shows the exclude that would empty this).
+          - type: history-graph
+            hours_to_show: 0.5
+            min_y_axis: -170
+            max_y_axis: 170
+            entities:
+              - entity: sensor.fake_arm_2_joint_1_j1
+                name: J1
+              - entity: sensor.fake_arm_2_joint_2_j2
+                name: J2
+              - entity: sensor.fake_arm_2_joint_3_j3
+                name: J3
+              - entity: sensor.fake_arm_2_joint_4_j4
+                name: J4
+              - entity: sensor.fake_arm_2_joint_5_j5
+                name: J5
+              - entity: sensor.fake_arm_2_joint_6_j6
+                name: J6
+              - entity: sensor.fake_arm_2_joint_7_j7
+                name: J7
+      - type: grid
+        column_span: 1
+        cards:
+          - type: heading
+            heading: Task results
+            heading_style: title
+            icon: mdi:flag-checkered
+          - type: logbook
+            entities:
+              - event.fake_arm_2_task_result
+            hours_to_show: 24

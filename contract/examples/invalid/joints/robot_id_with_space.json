@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "robot_id": "fake arm 1",
+  "positions": [
+    12.5,
+    -34.0,
+    90.25,
+    -45.5,
+    0.0,
+    60.75,
+    -10.0
+  ],
+  "velocities": null,
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc:4123",
+  "seq": 7,
+  "ts": 1760356803500
+}

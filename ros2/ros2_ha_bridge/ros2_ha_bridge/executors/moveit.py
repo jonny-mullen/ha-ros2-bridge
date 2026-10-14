@@ -57,6 +57,18 @@ the real node, from the node's own params file; see :meth:`MoveItExecutor.setup`
     ``false`` it finishes ``cancelled`` as soon as the cancel request has been
     sent, and the confirmation that follows is dropped. The ``stop`` task's
     error clearing follows the same rule (below).
+``moveit.joint_states_topic`` (``/joint_states``), ``moveit.joint_names`` (empty)
+    Joint telemetry (0.2.0). The adapter subscribes to ``sensor_msgs/JointState``
+    on the topic and the executor forwards the positions (and velocities,
+    when the message carries them) of the group's joints to
+    ``ctx.report_joints``, in radians, with no limits; the node throttles
+    them. The joints are ``moveit.joint_names`` when given, otherwise the
+    joints of the first configured pose, in that order. Their announced names
+    are the MoveIt names made to fit the contract's pattern (lower-case,
+    other characters to ``_``, 32 characters); when two names collapse into
+    one or a name has nothing left, no joints are announced and a warning
+    says why. A ``JointState`` message that lacks one of the joints is
+    skipped.
 
 Task catalogue (the ``kind`` decides how the bridge gates it):
 
@@ -112,6 +124,7 @@ import importlib
 import logging
 import math
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,8 +132,10 @@ from typing import Any, Literal, Protocol, TypeGuard
 
 from ros2_ha_bridge import __version__
 from ros2_ha_bridge.executors.base import (
+    MAX_JOINTS,
     BridgeContext,
     HealthLevel,
+    JointInfo,
     ResultStatus,
     TaskExecutor,
     TaskHandle,
@@ -129,13 +144,14 @@ from ros2_ha_bridge.executors.base import (
     TaskResult,
     TaskSpec,
 )
-from ros2_ha_bridge.protocol import validate_params
+from ros2_ha_bridge.protocol import is_valid_joint_name, validate_params
 
 __all__ = [
     'CONTROL_TIMEOUT_S',
     'DEFAULT_ACCELERATION_SCALE',
     'DEFAULT_ACTION_NAME',
     'DEFAULT_HOLD_ON_CANCEL',
+    'DEFAULT_JOINT_STATES_TOPIC',
     'DEFAULT_NUM_ATTEMPTS',
     'DEFAULT_PLANNING_TIME_S',
     'DEFAULT_VELOCITY_SCALE',
@@ -155,11 +171,13 @@ __all__ = [
     'ErrorClass',
     'GoalHandle',
     'GoalOutcome',
+    'JointStateCallback',
     'MappedCode',
     'MoveGroupAdapter',
     'MoveItExecutor',
     'MoveItSettings',
     'RclpyMoveGroupAdapter',
+    'announce_joint_names',
     'build_catalogue',
     'build_goal',
     'error_class',
@@ -182,6 +200,8 @@ DEFAULT_NUM_ATTEMPTS = 1
 DEFAULT_VELOCITY_SCALE = 0.1
 DEFAULT_ACCELERATION_SCALE = 0.1
 DEFAULT_HOLD_ON_CANCEL = True
+#: ``sensor_msgs/JointState`` topic the joint telemetry is read from.
+DEFAULT_JOINT_STATES_TOPIC = '/joint_states'
 #: ``tolerance_above`` and ``tolerance_below`` of every joint constraint, in radians.
 JOINT_TOLERANCE_RAD = 0.01
 #: The pose name that also gets its own ``home`` task.
@@ -198,7 +218,7 @@ STATUS_CANCELED = 5
 STATUS_ABORTED = 6
 
 #: The scalar parameters the real adapter declares on the node: name, default, description.
-SCALAR_PARAMETERS: tuple[tuple[str, str | int | float | bool, str], ...] = (
+SCALAR_PARAMETERS: tuple[tuple[str, str | int | float | bool | list[str], str], ...] = (
     ('moveit.group_name', '', 'MoveIt executor: the planning group (required).'),
     (POSES_PARAMETER, '', 'MoveIt executor: path of a poses YAML file, or inline poses.'),
     ('moveit.action_name', DEFAULT_ACTION_NAME, 'MoveIt executor: the MoveGroup action name.'),
@@ -222,6 +242,16 @@ SCALAR_PARAMETERS: tuple[tuple[str, str | int | float | bool, str], ...] = (
         'moveit.hold_on_cancel',
         DEFAULT_HOLD_ON_CANCEL,
         'MoveIt executor: finish a cancelled task only once move_group confirms the hold.',
+    ),
+    (
+        'moveit.joint_states_topic',
+        DEFAULT_JOINT_STATES_TOPIC,
+        'MoveIt executor: the sensor_msgs/JointState topic the joint telemetry is read from.',
+    ),
+    (
+        'moveit.joint_names',
+        [],
+        "MoveIt executor: the joints to report, in order; empty means the first pose's joints.",
     ),
 )
 _KNOWN_PARAMETERS = frozenset(name for name, _, _ in SCALAR_PARAMETERS)
@@ -397,6 +427,11 @@ class GoalHandle(Protocol):
         """Ask the server to cancel this goal. The outcome still arrives through ``add_done``."""
 
 
+#: ``callback(names, positions, velocities)`` for one ``sensor_msgs/JointState`` message;
+#: ``velocities`` is ``None`` when the message carries none.
+JointStateCallback = Callable[[Sequence[str], Sequence[float], Sequence[float] | None], None]
+
+
 class MoveGroupAdapter(Protocol):
     """The slice of an action client the core needs; :class:`RclpyMoveGroupAdapter` is the real one."""
 
@@ -406,8 +441,11 @@ class MoveGroupAdapter(Protocol):
     def send_goal(self, goal: Mapping[str, Any], feedback: Callable[[str], None]) -> GoalHandle:
         """Send the goal built by :func:`build_goal`; ``feedback`` receives the action's state string."""
 
+    def subscribe_joint_states(self, topic: str, callback: JointStateCallback) -> None:
+        """Deliver every ``sensor_msgs/JointState`` on ``topic`` to ``callback`` (0.2.0)."""
+
     def close(self) -> None:
-        """Release the client at shutdown."""
+        """Release the client (and the joint-state subscription) at shutdown."""
 
 
 # --------------------------------------------------------------------------- settings and poses
@@ -497,6 +535,33 @@ def unknown_parameter_names(parameters: Mapping[str, Any]) -> list[str]:
     return sorted(unknown)
 
 
+def announce_joint_names(raw_names: Sequence[str]) -> tuple[str, ...] | None:
+    """The announce form of MoveIt joint names, or ``None`` when they cannot be told apart.
+
+    Each name is lower-cased, runs of characters outside ``[a-z0-9_]`` become
+    ``_``, leading characters that are not letters are dropped and the rest
+    is cut to 32 characters, so ``shoulder_pan_joint`` stays itself and
+    ``Gripper.Finger`` becomes ``gripper_finger``. ``None`` means a name had
+    nothing left, two names collapsed into one, or there are none or more
+    than 32; the executor then announces no joints.
+    """
+    if not 1 <= len(raw_names) <= MAX_JOINTS:
+        return None
+    announced: list[str] = []
+    for raw in raw_names:
+        if is_valid_joint_name(raw):
+            announced.append(raw)
+            continue
+        cleaned = re.sub(r'[^a-z0-9_]+', '_', str(raw).lower()).strip('_')
+        cleaned = re.sub(r'^[^a-z]+', '', cleaned)[:32]
+        if not is_valid_joint_name(cleaned):
+            return None
+        announced.append(cleaned)
+    if len(set(announced)) != len(announced):
+        return None
+    return tuple(announced)
+
+
 @dataclass(frozen=True)
 class MoveItSettings:
     """The executor's parameters, validated. Build with :meth:`from_parameters`."""
@@ -512,6 +577,10 @@ class MoveItSettings:
     poses_file: Path | None = None
     #: The inline poses (empty when a file is used).
     inline_poses: Mapping[str, Mapping[str, float]] = field(default_factory=dict)
+    #: ``sensor_msgs/JointState`` topic for the joint telemetry.
+    joint_states_topic: str = DEFAULT_JOINT_STATES_TOPIC
+    #: The joints to report, in order; empty means the first pose's joints.
+    joint_names: tuple[str, ...] = ()
 
     @property
     def poses_source(self) -> str:
@@ -554,6 +623,12 @@ class MoveItSettings:
         hold = parameters.get('moveit.hold_on_cancel', DEFAULT_HOLD_ON_CANCEL)
         if not isinstance(hold, bool):
             raise TypeError(f'moveit.hold_on_cancel must be true or false, not {hold!r}')
+        joint_states_topic = _string(
+            parameters, 'moveit.joint_states_topic', DEFAULT_JOINT_STATES_TOPIC
+        ).strip()
+        if not joint_states_topic:
+            raise ValueError('moveit.joint_states_topic must name a sensor_msgs/JointState topic')
+        joint_names = _strings(parameters, 'moveit.joint_names')
         poses_file, inline = _poses_from(parameters)
         return cls(
             group_name=group_name,
@@ -565,6 +640,8 @@ class MoveItSettings:
             hold_on_cancel=hold,
             poses_file=poses_file,
             inline_poses=inline,
+            joint_states_topic=joint_states_topic,
+            joint_names=joint_names,
         )
 
 
@@ -580,6 +657,23 @@ def _number(parameters: Mapping[str, Any], name: str, default: float) -> float:
     if not _is_number(value) or not math.isfinite(float(value)):
         raise ValueError(f'{name} must be a finite number, not {value!r}')
     return float(value)
+
+
+def _strings(parameters: Mapping[str, Any], name: str) -> tuple[str, ...]:
+    """A list-of-strings parameter; absent, ``None`` or empty gives ``()``."""
+    value = parameters.get(name)
+    if value is None or value == '' or (isinstance(value, (list, tuple)) and not value):
+        return ()
+    if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
+        raise TypeError(f'{name} must be a list of strings, not {type(value).__name__}')
+    names: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError(f'{name} must contain only non-empty strings, found {item!r}')
+        names.append(item.strip())
+    if len(set(names)) != len(names):
+        raise ValueError(f'{name} must not repeat a joint name')
+    return tuple(names)
 
 
 def _poses_from(parameters: Mapping[str, Any]) -> tuple[Path | None, Poses]:
@@ -744,6 +838,12 @@ class MoveItExecutor(TaskExecutor):
         self._poses: Poses = {}
         self._catalogue: tuple[TaskSpec, ...] = ()
         self._active: _Run | None = None
+        #: The MoveIt joint names reported, in announce order, and the announced JointInfo.
+        self._joint_names: tuple[str, ...] = ()
+        self._joint_info: JointInfo | None = None
+        self._joint_states_seen = 0
+        self._joint_states_skipped = 0
+        self._joint_state_warned = False
 
     # ------------------------------------------------------------------ views
 
@@ -763,6 +863,21 @@ class MoveItExecutor(TaskExecutor):
         """Id of the motion task whose goal is in flight, or ``None``."""
         return None if self._active is None else self._active.request.id
 
+    @property
+    def joint_names(self) -> tuple[str, ...]:
+        """The MoveIt joint names forwarded from ``JointState``, in the announced order."""
+        return self._joint_names
+
+    @property
+    def joint_states_seen(self) -> int:
+        """``JointState`` messages forwarded so far (skipped ones not counted)."""
+        return self._joint_states_seen
+
+    @property
+    def joint_states_skipped(self) -> int:
+        """``JointState`` messages skipped because a configured joint was missing."""
+        return self._joint_states_skipped
+
     # ------------------------------------------------------------------ TaskExecutor
 
     def setup(self, ctx: BridgeContext) -> None:
@@ -781,10 +896,11 @@ class MoveItExecutor(TaskExecutor):
                     'MoveItExecutor needs ctx.node (the rclpy node) or an injected adapter'
                 )
             self._adapter = self._adapter_factory(ctx.node, settings.action_name, self._logger)
+        self._setup_joints(settings)
         self._logger.info(
             'moveit executor ready for %s: group=%s action=%s poses=%s (from %s) '
             'planning_time_s=%g attempts=%d velocity_scale=%g acceleration_scale=%g '
-            'hold_on_cancel=%s server_available=%s',
+            'hold_on_cancel=%s server_available=%s joints=%s',
             ctx.robot_id,
             settings.group_name,
             settings.action_name,
@@ -796,12 +912,16 @@ class MoveItExecutor(TaskExecutor):
             settings.acceleration_scale,
             settings.hold_on_cancel,
             self._server_available(),
+            ', '.join(self._joint_names) or 'none',
         )
 
     def tasks(self) -> Sequence[TaskSpec]:
         if self._settings is None:
             raise RuntimeError('MoveItExecutor.setup() has not been called')
         return self._catalogue
+
+    def joints(self) -> JointInfo | None:
+        return self._joint_info
 
     def start(self, req: TaskRequest, handle: TaskHandle) -> None:
         spec = next((s for s in self._catalogue if s.name == req.task), None)
@@ -1128,6 +1248,71 @@ class MoveItExecutor(TaskExecutor):
             },
         )
 
+    # ------------------------------------------------------------------ joint telemetry
+
+    def _setup_joints(self, settings: MoveItSettings) -> None:
+        """Decide the reported joints, announce them and subscribe to the joint states."""
+        raw_names = settings.joint_names
+        if not raw_names:
+            first = next(iter(self._poses.values()), None)
+            raw_names = () if first is None else tuple(first)
+        announced = announce_joint_names(raw_names)
+        if announced is None:
+            self._logger.warning(
+                'joint telemetry off: the joint names %r cannot all be announced (each must '
+                'reduce to a distinct ^[a-z][a-z0-9_]{0,31}$ name, 1 to 32 of them); set '
+                'moveit.joint_names to a list that can',
+                list(raw_names),
+            )
+            self._joint_names = ()
+            self._joint_info = None
+            return
+        self._joint_names = tuple(raw_names)
+        self._joint_info = JointInfo(names=announced, unit='rad', limits=None)
+        subscribe = getattr(self._adapter, 'subscribe_joint_states', None)
+        if not callable(subscribe):
+            self._logger.warning(
+                'the adapter offers no subscribe_joint_states; joints are announced but '
+                'never reported'
+            )
+            return
+        subscribe(settings.joint_states_topic, self._on_joint_state)
+
+    def _on_joint_state(
+        self, names: Sequence[str], positions: Sequence[float], velocities: Sequence[float] | None
+    ) -> None:
+        """One ``JointState``: pick the configured joints in announce order and report them.
+
+        Called on whatever thread the adapter uses (rclpy's executor thread
+        for the real one); ``ctx.report_joints`` posts to the bridge's main
+        thread, and nothing here touches the executor's task state.
+        """
+        if not self._joint_names:
+            return
+        index_by_name = {str(name): index for index, name in enumerate(names)}
+        try:
+            indexes = [index_by_name[joint] for joint in self._joint_names]
+            ordered = [float(positions[index]) for index in indexes]
+        except (KeyError, IndexError, TypeError, ValueError):
+            self._joint_states_skipped += 1
+            if not self._joint_state_warned:
+                self._joint_state_warned = True
+                missing = [joint for joint in self._joint_names if joint not in index_by_name]
+                self._logger.warning(
+                    'JointState on %s lacks %s; such messages are skipped (logged once)',
+                    self.settings.joint_states_topic,
+                    ', '.join(missing) or 'a position for a configured joint',
+                )
+            return
+        speeds: list[float] | None = None
+        if velocities is not None and len(velocities) >= len(positions):
+            try:
+                speeds = [float(velocities[index]) for index in indexes]
+            except (IndexError, TypeError, ValueError):
+                speeds = None
+        self._joint_states_seen += 1
+        self._context().report_joints(ordered, speeds)
+
     # ------------------------------------------------------------------ parameters
 
     def _collect_parameters(self, ctx: BridgeContext) -> dict[str, Any]:
@@ -1261,8 +1446,10 @@ class RclpyMoveGroupAdapter:
         self._constraints_cls: Any = msg_module.Constraints
         self._joint_constraint_cls: Any = msg_module.JointConstraint
         self._logger = logger
+        self._node = node
         self.action_name = action_name
         self._client: Any = action_client_cls(node, self._move_group, action_name)
+        self._joint_states: Any = None
 
     def server_available(self) -> bool:
         return bool(self._client.server_is_ready())
@@ -1278,7 +1465,38 @@ class RclpyMoveGroupAdapter:
         handle.attach(future)
         return handle
 
+    def subscribe_joint_states(self, topic: str, callback: JointStateCallback) -> None:
+        """Subscribe to ``sensor_msgs/JointState`` with the sensor-data QoS (best effort).
+
+        A best-effort subscription matches a reliable publisher
+        (``joint_state_broadcaster``) as well as a best-effort one, so the
+        telemetry works whichever the robot's driver chose. Velocities are
+        passed on only when the message carries one per name.
+        """
+        joint_state_cls: Any = importlib.import_module('sensor_msgs.msg').JointState
+        qos: Any = importlib.import_module('rclpy.qos').qos_profile_sensor_data
+
+        def on_message(message: Any) -> None:
+            names = [str(name) for name in message.name]
+            positions = [float(value) for value in message.position]
+            velocities: list[float] | None = None
+            if len(message.velocity) == len(names):
+                velocities = [float(value) for value in message.velocity]
+            callback(names, positions, velocities)
+
+        if self._joint_states is not None:
+            self._node.destroy_subscription(self._joint_states)
+        self._joint_states = self._node.create_subscription(
+            joint_state_cls, topic, on_message, qos
+        )
+
     def close(self) -> None:
+        if self._joint_states is not None:
+            try:
+                self._node.destroy_subscription(self._joint_states)
+            except Exception:
+                self._logger.exception('could not destroy the joint_states subscription')
+            self._joint_states = None
         self._client.destroy()
 
     def build_message(self, goal: Mapping[str, Any]) -> Any:

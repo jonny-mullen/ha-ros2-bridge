@@ -91,7 +91,7 @@ Settings, Devices and services, ROS 2 Bridge, the three-dot menu, Download diagn
 |---|---|
 | `entry.options` | The options as saved; check the prefix first. |
 | `hub.mqtt_connected`, `hub.ready`, `hub.reconciled` | All three should be true a few seconds after start. `ready` false means the ack and result subscriptions were never confirmed; `reconciled` false means the 3 s settle period after readiness and connection has not passed. |
-| `hub.subscriptions` | The seven filters with their QoS; they must carry the prefix the robots use. |
+| `hub.subscriptions` | The eight filters with their QoS (six at QoS 1, `feedback` and `joints` at QoS 0); they must carry the prefix the robots use. |
 | `hub.heartbeat` | `seq` rising and `last_sent_at` recent means Home Assistant is publishing its heartbeat. |
 | `hub.robots.{id}.availability`, `.available`, `.heartbeat_age_s`, `.heartbeat_stale`, `.heartbeat_unavailable` | Why the entities are or are not available. |
 | `hub.robots.{id}.session`, `.instance`, `.session_change_count` | A rising change count is a restarting node or a duplicate id. |

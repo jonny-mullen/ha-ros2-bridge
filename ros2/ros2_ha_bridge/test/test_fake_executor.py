@@ -3,15 +3,15 @@
 """Tests for :mod:`ros2_ha_bridge.executors.fake` driven through a real :class:`TaskManager`.
 
 Every task of the catalogue, every failure class, the hang path, pause and
-resume, and determinism against the fake clock: two identical runs must
-publish byte-identical payloads.
+resume, the seven simulated joints (0.2.0) and determinism against the fake
+clock: two identical runs must publish byte-identical payloads.
 """
 
 from __future__ import annotations
 
 import json
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,16 +19,24 @@ import pytest
 
 from ros2_ha_bridge import protocol
 from ros2_ha_bridge.authoriser import resolve_request
-from ros2_ha_bridge.executors.base import BridgeContext, TaskSpec, load_executor
+from ros2_ha_bridge.executors.base import BridgeContext, JointInfo, TaskSpec, load_executor
 from ros2_ha_bridge.executors.fake import (
     DEFAULT_FEEDBACK_HZ,
     DEFAULT_TASK_DURATION_S,
+    FAIL_MOTION_FRACTION,
+    FAIL_TOWARDS_POSE,
     FAILURE_CLASSES,
     FAILURE_REASONS,
     HANG_TIMEOUT_S,
+    HOME_POSE,
+    JOINT_INFO,
+    JOINT_LIMITS,
+    JOINT_NAMES,
+    POSES,
     FakeExecutor,
+    interpolate,
 )
-from ros2_ha_bridge.protocol import AckPayload, Announce, DecodedCommand
+from ros2_ha_bridge.protocol import AckPayload, Announce, AnnounceJoints, DecodedCommand
 from ros2_ha_bridge.task_manager import TaskManager
 
 from .conftest import assert_imports_without
@@ -38,6 +46,8 @@ ROBOT = 'fake_arm'
 SESSION = '9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e'
 INSTANCE = 'robotpc:4123'
 PARAMETERS = {'fake.task_duration_s': 2.0, 'fake.feedback_hz': 2}
+HOME = POSES['home']
+PICK = POSES['pick']
 
 
 @dataclass(frozen=True)
@@ -67,6 +77,8 @@ class Rig:
         self.clock = clock
         self.scheduler = scheduler
         self.published: list[Published] = []
+        #: Every ``ctx.report_joints`` call: (positions, velocities, monotonic time).
+        self.joints: list[tuple[tuple[float, ...], tuple[float, ...] | None, float]] = []
         self.executor = FakeExecutor()
         self.manager = TaskManager(
             robot_id=ROBOT,
@@ -82,6 +94,7 @@ class Rig:
             self.manager.bridge_context(
                 ha_link_ok=lambda: True,
                 parameters=PARAMETERS if parameters is None else parameters,
+                report_joints=self._report_joints,
             )
         )
         self.specs = {spec.name: spec for spec in self.executor.tasks()}
@@ -94,6 +107,22 @@ class Rig:
         wire = protocol.encode_payload(payload)
         self.published.append(Published(topic, json.loads(wire), qos, retain, expiry_s))
         return True
+
+    def _report_joints(
+        self, positions: Sequence[float], velocities: Sequence[float] | None
+    ) -> None:
+        self.joints.append(
+            (
+                tuple(positions),
+                None if velocities is None else tuple(velocities),
+                self.clock.monotonic(),
+            )
+        )
+
+    @property
+    def reported(self) -> list[tuple[float, ...]]:
+        """The positions of every joint report, oldest first."""
+        return [positions for positions, _, _ in self.joints]
 
     def of(self, kind: str) -> list[Published]:
         return [p for p in self.published if p.kind == kind]
@@ -192,6 +221,8 @@ def test_catalogue_is_announceable(rig: Rig, schema_validator: Any) -> None:
     )
     assert rig.specs['hang'].timeout_s == HANG_TIMEOUT_S == 10
     assert FakeExecutor.name == 'fake' and FakeExecutor.version == protocol.__version__
+    joints = rig.executor.joints()
+    assert joints is not None and protocol.validate_joint_info(joints) == []
     announce = Announce(
         robot_id=ROBOT,
         name='Fake arm',
@@ -199,6 +230,7 @@ def test_catalogue_is_announceable(rig: Rig, schema_validator: Any) -> None:
         instance=INSTANCE,
         executor=protocol.ExecutorInfo(FakeExecutor.name, FakeExecutor.version),
         tasks=specs,
+        joints=AnnounceJoints.from_joint_info(joints, 2.0),
         ts=rig.clock.now_ms(),
     )
     schema_validator.assert_valid('announce', announce.to_payload())
@@ -270,6 +302,9 @@ def test_move_to_reports_the_pose_and_needs_one(rig: Rig) -> None:
     assert ack.code == 'rejected_executor' and "'pose' is required" in ack.reason
     _, ack = rig.run('move_to', {'pose': 7})
     assert ack.code == 'rejected_executor' and 'must be a string' in ack.reason
+    _, ack = rig.run('move_to', {'pose': 'nowhere'})
+    assert ack.code == 'rejected_executor'
+    assert ack.reason == "'pose' must be one of ['home', 'pick', 'place', 'wave']"
     assert rig.manager.state == 'idle'
 
 
@@ -542,10 +577,186 @@ def test_task_spec_shapes_match_the_design(rig: Rig) -> None:
     assert isinstance(rig.specs['move_to'], TaskSpec)
     assert rig.specs['move_to'].params == {
         'type': 'object',
-        'properties': {'pose': {'type': 'string', 'description': 'Named pose to move to'}},
+        'properties': {
+            'pose': {
+                'type': 'string',
+                'enum': ['home', 'pick', 'place', 'wave'],
+                'description': 'Named pose to move to',
+            }
+        },
         'required': ['pose'],
     }
     assert rig.specs['wait'].params is not None
     assert rig.specs['wait'].params['required'] == ['seconds']
     assert rig.specs['wait'].params['properties']['seconds']['minimum'] == 0
     assert all(rig.specs[n].params is None for n in ('reset', 'hang', 'stop', 'pause', 'resume'))
+
+
+# --------------------------------------------------------------------------- the seven joints
+
+
+def test_joint_info_matches_the_contract_fixture() -> None:
+    assert JOINT_NAMES == ('j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7')
+    assert JOINT_LIMITS == (
+        (-170.0, 170.0),
+        (-170.0, 170.0),
+        (-170.0, 170.0),
+        (-120.0, 120.0),
+        (-170.0, 170.0),
+        (-120.0, 120.0),
+        (-170.0, 170.0),
+    )
+    assert JOINT_INFO == JointInfo(names=JOINT_NAMES, unit='deg', limits=JOINT_LIMITS)
+    assert JOINT_INFO.count == 7 and protocol.validate_joint_info(JOINT_INFO) == []
+    assert list(POSES) == ['home', 'pick', 'place', 'wave']
+    assert POSES[HOME_POSE] == (0.0,) * 7
+    assert FAIL_TOWARDS_POSE in POSES and FAIL_MOTION_FRACTION == 0.5
+    for name, pose in POSES.items():
+        assert len(pose) == 7, name
+        for value, (low, high) in zip(pose, JOINT_LIMITS, strict=True):
+            assert low < value < high or value == 0.0, f'{name} outside its limits'
+    assert len({pose for pose in POSES.values()}) == 4, 'the poses are distinct'
+    assert interpolate(HOME, PICK, 0.0) == HOME and interpolate(HOME, PICK, 1.0) == PICK
+    assert interpolate(HOME, PICK, 0.5) == tuple(v / 2 for v in PICK)
+    assert interpolate(HOME, PICK, 1.5) == PICK and interpolate(HOME, PICK, -1) == HOME
+
+
+def test_setup_reports_the_home_pose_once(rig: Rig) -> None:
+    assert rig.joints == [(HOME, None, rig.clock.monotonic())]
+    assert rig.executor.positions == HOME
+    assert rig.executor.joints() is JOINT_INFO
+
+
+def test_move_to_interpolates_from_home_to_pick_over_the_duration(rig: Rig) -> None:
+    command, ack = rig.run('move_to', {'pose': 'pick'})
+    assert ack.code == 'accepted'
+    assert rig.reported == [HOME], 'nothing new until the first tick'
+    rig.clock.advance(0.5)
+    assert rig.reported[-1] == interpolate(HOME, PICK, 0.25)
+    rig.clock.advance(0.5)
+    assert rig.reported[-1] == interpolate(HOME, PICK, 0.5) == tuple(v / 2 for v in PICK)
+    rig.clock.advance(0.5)
+    assert rig.reported[-1] == interpolate(HOME, PICK, 0.75)
+    rig.clock.advance(0.5)
+    assert rig.result_of(command)['status'] == 'succeeded'
+    assert rig.reported[-1] == PICK and rig.executor.positions == PICK
+    assert rig.reported == [HOME] + [interpolate(HOME, PICK, f) for f in (0.25, 0.5, 0.75, 1.0)]
+    assert all(velocities is None for _, velocities, _ in rig.joints)
+    assert [t - 1000.0 for _, _, t in rig.joints] == pytest.approx([0.0, 0.5, 1.0, 1.5, 2.0])
+    # The feedback and the joint reports share the ticker, so neither is doubled.
+    assert [f['progress'] for f in rig.feedbacks] == [0.25, 0.5, 0.75]
+
+
+def test_positions_persist_across_tasks_and_reset_returns_home(rig: Rig) -> None:
+    rig.run('move_to', {'pose': 'pick'})
+    rig.clock.advance(2)
+    assert rig.executor.positions == PICK
+    reset, _ = rig.run('reset')
+    rig.clock.advance(0.5)
+    assert rig.reported[-1] == interpolate(PICK, HOME, 0.25), 'reset starts where move_to ended'
+    rig.clock.advance(1.5)
+    assert rig.result_of(reset)['status'] == 'succeeded'
+    assert rig.result_of(reset)['reason'] == "Moved to pose 'home'"
+    assert rig.executor.positions == HOME and rig.reported[-1] == HOME
+    wave, _ = rig.run('move_to', {'pose': 'wave'})
+    rig.clock.advance(2)
+    assert rig.result_of(wave)['data'] == {'pose': 'wave'}
+    assert rig.executor.positions == POSES['wave']
+    place, _ = rig.run('move_to', {'pose': 'place'})
+    rig.clock.advance(1)
+    assert rig.reported[-1] == interpolate(POSES['wave'], POSES['place'], 0.5)
+    rig.clock.advance(1)
+    assert rig.result_of(place)['status'] == 'succeeded'
+    assert rig.executor.positions == POSES['place']
+
+
+def test_pause_freezes_the_joints_and_resume_continues_from_there(rig: Rig) -> None:
+    running, _ = rig.run('move_to', {'pose': 'pick'})
+    rig.clock.advance(1)
+    halfway = interpolate(HOME, PICK, 0.5)
+    assert rig.executor.positions == halfway
+    rig.run('pause')
+    assert rig.executor.positions == halfway and rig.reported[-1] == halfway
+    reports = len(rig.joints)
+    rig.clock.advance(30)
+    assert len(rig.joints) == reports and rig.executor.positions == halfway, 'frozen'
+    rig.run('resume')
+    rig.clock.advance(0.5)
+    assert rig.reported[-1] == interpolate(HOME, PICK, 0.75), 'continues from the frozen point'
+    rig.clock.advance(0.5)
+    assert rig.result_of(running)['status'] == 'succeeded'
+    assert rig.executor.positions == PICK
+
+
+def test_fail_moves_halfway_towards_pick_and_stops_there(rig: Rig) -> None:
+    command, _ = rig.run('fail', {'code': 'collision'})
+    rig.clock.advance(1)
+    assert rig.reported[-1] == interpolate(HOME, PICK, 0.25), 'half speed: a quarter at half time'
+    rig.clock.advance(1)
+    result = rig.result_of(command)
+    assert result['status'] == 'aborted' and result['code'] == 'collision'
+    assert rig.executor.positions == interpolate(HOME, PICK, FAIL_MOTION_FRACTION)
+    assert rig.reported[-1] == rig.executor.positions
+    # The next motion starts from where the failed one stopped.
+    rig.run('reset')
+    rig.clock.advance(0.5)
+    assert rig.reported[-1] == interpolate(interpolate(HOME, PICK, 0.5), HOME, 0.25)
+
+
+def test_cancel_and_stop_freeze_the_joints_where_they_are(rig: Rig) -> None:
+    running, _ = rig.run('move_to', {'pose': 'pick'})
+    rig.clock.advance(0.7)
+    assert rig.cancel().code == 'accepted'
+    assert rig.result_of(running)['status'] == 'cancelled'
+    frozen = interpolate(HOME, PICK, 0.35)
+    assert rig.executor.positions == frozen and rig.reported[-1] == frozen
+    rig.clock.advance(5)
+    assert rig.executor.positions == frozen
+    second, _ = rig.run('move_to', {'pose': 'place'})
+    rig.clock.advance(0.6)
+    rig.run('stop')
+    assert rig.result_of(second)['code'] == 'preempted'
+    assert rig.executor.positions == interpolate(frozen, POSES['place'], 0.3)
+    third, _ = rig.run('move_to', {'pose': 'wave'})
+    rig.clock.advance(1.0)
+    rig.manager.stop_and_hold('HA heartbeat lost')
+    assert rig.result_of(third)['code'] == 'inhibited'
+    assert rig.executor.positions == interpolate(
+        interpolate(frozen, POSES['place'], 0.3), POSES['wave'], 0.5
+    )
+
+
+def test_wait_and_hang_hold_the_joints(rig: Rig) -> None:
+    rig.run('move_to', {'pose': 'pick'})
+    rig.clock.advance(2)
+    reports = len(rig.joints)
+    waiting, _ = rig.run('wait', {'seconds': 2})
+    rig.clock.advance(2)
+    assert rig.result_of(waiting)['status'] == 'succeeded'
+    assert rig.executor.positions == PICK
+    # Ticks at 0.5, 1.0 and 1.5 s; at 2.0 s the completion fires first and cancels the ticker,
+    # and a holding task has nowhere to arrive, so no fourth report.
+    assert len(rig.joints) == reports + 3, 'one report per tick, all at the same pose'
+    assert all(positions == PICK for positions in rig.reported[reports:])
+    rig.run('hang')
+    rig.clock.advance(15)
+    assert rig.executor.positions == PICK and len(rig.joints) == reports + 3
+    assert rig.manager.state == 'error'
+
+
+def test_joint_reports_are_dropped_without_a_sink(
+    clock: FakeClock, scheduler: FakeScheduler
+) -> None:
+    executor = FakeExecutor()
+    manager = TaskManager(
+        robot_id=ROBOT,
+        executor=executor,
+        publish=lambda *args: True,
+        post=lambda fn: fn(),
+        clock=clock,
+        scheduler=scheduler,
+        session=SESSION,
+        instance=INSTANCE,
+    )
+    executor.setup(manager.bridge_context(ha_link_ok=lambda: True, parameters=PARAMETERS))
+    assert executor.positions == HOME, 'setup reported into the void without raising'

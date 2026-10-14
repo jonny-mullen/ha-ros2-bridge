@@ -63,6 +63,7 @@ KINDS: tuple[str, ...] = (
     'state',
     'heartbeat_robot',
     'heartbeat_ha',
+    'joints',
     'command',
     'ack',
     'feedback',

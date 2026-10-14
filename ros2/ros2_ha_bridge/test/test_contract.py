@@ -24,10 +24,11 @@ from typing import Any
 import pytest
 
 from ros2_ha_bridge import protocol
-from ros2_ha_bridge.executors.base import TaskSpec
+from ros2_ha_bridge.executors.base import JointInfo, TaskSpec
 from ros2_ha_bridge.protocol import (
     ACK_CODES,
     DEFAULT_PREFIX,
+    JOINT_UNITS,
     MAX_ANNOUNCE_BYTES,
     MAX_PAYLOAD_BYTES,
     RESULT_STATUSES,
@@ -36,6 +37,7 @@ from ros2_ha_bridge.protocol import (
     WATCHDOG_MODES,
     AckPayload,
     Announce,
+    AnnounceJoints,
     Capabilities,
     Counters,
     DecodedCommand,
@@ -43,6 +45,7 @@ from ros2_ha_bridge.protocol import (
     ExecutorInfo,
     FeedbackPayload,
     HeartbeatPayload,
+    JointsPayload,
     ResultPayload,
     RobotError,
     StatePayload,
@@ -134,6 +137,74 @@ def _announce_cases() -> dict[str, Announce]:
             instance=INSTANCE,
             tasks=[],
             ts=0,
+        ),
+        'seven_joints_deg_with_limits': Announce(
+            robot_id='fake_arm_1',
+            name='Fake arm 1',
+            executor=ExecutorInfo('fake', '0.2.0'),
+            session=SESSION,
+            instance=INSTANCE,
+            tasks=_tasks(),
+            joints=AnnounceJoints.from_joint_info(
+                JointInfo(
+                    names=('j1', 'j2', 'j3', 'j4', 'j5', 'j6', 'j7'),
+                    unit='deg',
+                    limits=((-170, 170),) * 3 + ((-120, 120),) + ((-170, 170),) * 3,
+                ),
+                2.0,
+            ),
+            ts=T0,
+        ),
+        'thirty_two_joints_rad_no_limits': Announce(
+            robot_id=ROBOT,
+            name='Left arm',
+            session=SESSION,
+            instance=INSTANCE,
+            tasks=_tasks(),
+            joints=AnnounceJoints.from_joint_info(
+                JointInfo(names=tuple(f'joint_{i:02d}' for i in range(32)), unit='rad'), 0.5
+            ),
+            ts=T0,
+        ),
+    }
+
+
+def _joints_cases() -> dict[str, JointsPayload]:
+    return {
+        'seven_deg_no_velocities': JointsPayload(
+            robot_id='fake_arm_1',
+            positions=[12.5, -34.0, 90.25, -45.5, 0.0, 60.75, -10.0],
+            session=SESSION,
+            instance=INSTANCE,
+            seq=7,
+            ts=T0 + 3500,
+        ),
+        'six_rad_with_velocities': JointsPayload(
+            robot_id=ROBOT,
+            positions=(0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0),
+            velocities=(0.0, 0.0, 0.1234, 0.0, -0.05, 0.0),
+            session=SESSION,
+            instance='bench-pc.local:988',
+            seq=0,
+            ts=T0,
+        ),
+        'one_joint_integers': JointsPayload(
+            robot_id='gripper_1',
+            positions=[1],
+            velocities=[0],
+            session=SESSION,
+            instance=INSTANCE,
+            seq=123456,
+            ts=T0,
+        ),
+        'thirty_two_joints': JointsPayload(
+            robot_id='a' * 32,
+            positions=[float(i) / 7 for i in range(32)],
+            velocities=[0.0] * 32,
+            session=SESSION,
+            instance=INSTANCE,
+            seq=1,
+            ts=T0,
         ),
     }
 
@@ -371,6 +442,7 @@ ENCODER_CASES: list[tuple[str, str, Any, int]] = [
     *(('announce', n, p, MAX_ANNOUNCE_BYTES) for n, p in _announce_cases().items()),
     *(('state', n, p, MAX_PAYLOAD_BYTES) for n, p in _state_cases().items()),
     *(('heartbeat_robot', n, p, MAX_PAYLOAD_BYTES) for n, p in _heartbeat_cases().items()),
+    *(('joints', n, p, MAX_PAYLOAD_BYTES) for n, p in _joints_cases().items()),
     *(('ack', n, p, MAX_PAYLOAD_BYTES) for n, p in _ack_cases().items()),
     *(('feedback', n, p, MAX_PAYLOAD_BYTES) for n, p in _feedback_cases().items()),
     *(('result', n, p, MAX_PAYLOAD_BYTES) for n, p in _result_cases().items()),
@@ -407,12 +479,27 @@ def test_encoder_cases_cover_the_closed_sets() -> None:
     assert states == set(STATES)
     modes = {p.watchdog_mode for k, _, p, _ in ENCODER_CASES if k in ('announce', 'state')}
     assert modes == set(WATCHDOG_MODES)
+    units = {p.joints.unit for k, _, p, _ in ENCODER_CASES if k == 'announce' and p.joints}
+    assert units == set(JOINT_UNITS)
+    joint_counts = {len(p.positions) for k, _, p, _ in ENCODER_CASES if k == 'joints'}
+    assert {1, protocol.MAX_JOINTS} <= joint_counts
 
 
 def test_announce_task_specs_pass_the_params_subset_check() -> None:
     for announce in _announce_cases().values():
         for spec in announce.tasks:
             assert protocol.validate_task_spec(spec) == []
+
+
+def test_announce_joint_blocks_pass_the_joint_info_check_and_the_lengths_agree() -> None:
+    for announce in _announce_cases().values():
+        block = announce.joints
+        if block is None:
+            continue
+        info = JointInfo(block.names, block.unit, block.limits)
+        assert protocol.validate_joint_info(info) == []
+        payload = announce.to_payload()['joints']
+        assert payload['limits'] is None or len(payload['limits']) == len(payload['names'])
 
 
 def test_result_and_error_codes_are_normalised_onto_the_wire(schema_validator: Any) -> None:

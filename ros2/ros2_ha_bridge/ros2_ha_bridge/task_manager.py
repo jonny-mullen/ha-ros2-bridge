@@ -86,6 +86,7 @@ from ros2_ha_bridge.executors.base import (
     RESULT_STATUSES,
     BridgeContext,
     HealthLevel,
+    ReportJointsFn,
     TaskExecutor,
     TaskKind,
     TaskRejected,
@@ -345,11 +346,15 @@ class TaskManager:
         ha_link_ok: Callable[[], bool],
         parameters: Mapping[str, Any] | None = None,
         node: Any = None,
+        report_joints: ReportJointsFn | None = None,
     ) -> BridgeContext:
         """The :class:`BridgeContext` to give ``executor.setup``, wired to this manager.
 
         ``ha_link_ok`` comes from the watchdog; ``parameters`` carries the
-        executor's node parameters keyed by their dotted names.
+        executor's node parameters keyed by their dotted names;
+        ``report_joints`` is the node's joint telemetry sink (0.2.0), which
+        the context calls through this manager's ``post`` so it always runs
+        on the main thread.
         """
         return BridgeContext(
             robot_id=self.robot_id,
@@ -363,6 +368,7 @@ class TaskManager:
             scheduler=self._scheduler,
             parameters=parameters,
             node=node,
+            report_joints=report_joints,
         )
 
     def gating_state(self) -> GatingState:

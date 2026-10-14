@@ -9,7 +9,8 @@ Sources, all relative to the repository root:
     ros2/ros2_ha_bridge/package.xml                  <version>...</version>
     ros2/ros2_ha_bridge/setup.py                     version="..."
     ros2/ros2_ha_bridge/ros2_ha_bridge/__init__.py   __version__ = "..."
-    CHANGELOG.md                                     first release heading; "## [Unreleased]" is skipped
+    CHANGELOG.md                                     first release heading; "## [Unreleased]" is read
+                                                     for pending changes, not for a version
 
 Usage:
 
@@ -20,9 +21,15 @@ Usage:
     python scripts/check_versions.py --changelog-section 0.1.0
                                                              print the CHANGELOG.md body for 0.1.0
 
-A CHANGELOG.md whose only heading is "## [Unreleased]" names no version yet; that is reported
-but only fails with --released (used by the release workflow). Exit status 0 when everything
-agrees, 1 otherwise.
+Between releases the code may run ahead of CHANGELOG.md: when the five code sources agree
+on a version newer than the last release heading and "## [Unreleased]" has content, the
+heading is reported as the last release and left out of the comparison, so the flag-less
+check (pre-commit, contract.yml) and --expect pass while the release is being prepared. The
+release workflow passes --released, which insists on a heading for the version, so a tag
+without its CHANGELOG.md section still fails. A code version older than the last release, or
+a newer one with nothing under Unreleased, fails as a disagreement. A CHANGELOG.md whose only
+heading is "## [Unreleased]" names no version yet; that is reported but only fails with
+--released. Exit status 0 when everything agrees, 1 otherwise.
 """
 
 from __future__ import annotations
@@ -133,6 +140,22 @@ def read_changelog(root: Path) -> str | None:
     return None
 
 
+def has_unreleased_changes(root: Path) -> bool:
+    """True when CHANGELOG.md has an Unreleased section with something written under it."""
+    return any(
+        version is None and any(line.strip() for line in body)
+        for version, body in changelog_sections(_read(root, CHANGELOG))
+    )
+
+
+def release_key(version: str) -> tuple[int, int, int]:
+    """The numeric triple of a version for ordering (a pre-release suffix is ignored)."""
+    major, minor, patch = (
+        int(part) for part in version.split("-", 1)[0].split("+", 1)[0].split(".")
+    )
+    return (major, minor, patch)
+
+
 def changelog_section(root: Path, version: str) -> str | None:
     """Body of the CHANGELOG.md section for version, or None when absent."""
     for found, body in changelog_sections(_read(root, CHANGELOG)):
@@ -196,22 +219,38 @@ def main(argv: list[str] | None = None) -> int:
     changelog_name = CHANGELOG.as_posix()
     changelog_version: str | None = None
     changelog_missing = False
+    pending: str | None = None  # the code version running ahead of the last release heading
+    code_versions = sorted(set(versions.values()))
     try:
         changelog_version = read_changelog(root)
+        unreleased = has_unreleased_changes(root)
     except SourceError as err:
         changelog_missing = True
         problems.append(f"{changelog_name}: {err}")
     else:
-        if changelog_version is not None:
+        if changelog_version is None:
+            if args.released:
+                problems.append(f"{changelog_name}: no release heading (only Unreleased)")
+        elif (
+            not args.released
+            and unreleased
+            and len(code_versions) == 1
+            and release_key(code_versions[0]) > release_key(changelog_version)
+        ):
+            pending = code_versions[0]
+        else:
             versions[changelog_name] = changelog_version
-        elif args.released:
-            problems.append(f"{changelog_name}: no release heading (only Unreleased)")
 
     width = max((len(name) for name in versions), default=len(changelog_name))
     for name, version in versions.items():
         print(f"{name:<{width}}  {version}")
     if changelog_version is None and not changelog_missing:
         print(f"{changelog_name:<{width}}  (no release heading yet, only Unreleased)")
+    elif pending is not None:
+        print(
+            f"{changelog_name:<{width}}  (last release {changelog_version}; "
+            f"{pending} pending under Unreleased)"
+        )
 
     distinct = sorted(set(versions.values()))
     if len(distinct) > 1:

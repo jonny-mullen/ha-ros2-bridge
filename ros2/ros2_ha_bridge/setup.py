@@ -10,7 +10,7 @@ package_name = 'ros2_ha_bridge'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.2.0',
     packages=find_packages(exclude=['test', 'test.*']),
     # The vendored contract schemas travel with the installed package so that
     # colcon test can validate against them; scripts/sync_contract.py keeps them

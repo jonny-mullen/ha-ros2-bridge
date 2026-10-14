@@ -20,7 +20,12 @@ each item. Commands go through the authoriser and the task manager, Home
 Assistant heartbeats feed the watchdog, HA's birth message schedules a
 re-announce after a random jitter, mirrored topics become ``std_msgs/String``
 envelopes on ``~/mqtt_in``, and a successful connect publishes the retained
-availability, announce and state. Every publish goes through the link's
+availability, announce and state. Joint telemetry (0.2.0): the executor's
+``ctx.report_joints`` calls arrive here through the same post, a
+:class:`~ros2_ha_bridge.joints_publisher.JointsPublisher` throttles them to
+``telemetry.joints_rate_hz`` and the minimum delta, and the connect burst
+(after the retained state) and every re-announce republish the latest
+positions once. Every publish goes through the link's
 guarded ``publish``, so nothing on the wire can end the process; every timer
 and guard callback is wrapped so an exception is logged, never propagated out
 of the executor. Every periodic timer and every one-shot runs on one
@@ -73,10 +78,12 @@ from ros2_ha_bridge.dedupe_store import DedupeStore
 from ros2_ha_bridge.executors.base import (
     BridgeContext,
     ExecutorLoadError,
+    JointInfo,
     TaskExecutor,
     TaskSpec,
     load_executor,
 )
+from ros2_ha_bridge.joints_publisher import JointsPublisher
 from ros2_ha_bridge.mqtt_link import (
     ConnectEvent,
     DisconnectEvent,
@@ -103,6 +110,7 @@ from ros2_ha_bridge.protocol import (
     HEARTBEAT_EXPIRY_S,
     MAX_ANNOUNCE_BYTES,
     Announce,
+    AnnounceJoints,
     Capabilities,
     Counters,
     DecodeError,
@@ -113,6 +121,7 @@ from ros2_ha_bridge.protocol import (
     encode_payload,
     local_instance,
     new_session,
+    validate_joint_info,
     validate_task_spec,
 )
 from ros2_ha_bridge.ros_adapters import (
@@ -208,6 +217,12 @@ class BridgeNode(Node):  # type: ignore[misc]
         self._announce_timer: TimerHandle | None = None
         self._heartbeat_seq = 0
         self._heartbeat_warned: set[str] = set()
+        self._joints_publisher: JointsPublisher | None = None
+        self._joint_info: JointInfo | None = None
+        self._joints_ignored_logged = False
+        #: Main-thread view of the connection: True from the end of the connect burst
+        #: (availability, announce, state) until the disconnect event is handled.
+        self._online = False
         try:
             self._build(client_factory)
         except BaseException:
@@ -290,9 +305,12 @@ class BridgeNode(Node):  # type: ignore[misc]
             ha_link_ok=self._watchdog.ha_link_ok,
             parameters=MappingProxyType(executor_parameters(settings)),
             node=self,
+            report_joints=self._on_joints_report,
         )
         self._setup_executor(context)
         catalogue = self._catalogue(settings.executor.tasks_allow)
+        self._joint_info = self._joints_from_executor()
+        self._joints_publisher = self._build_joints_publisher(self._joint_info)
         self._authoriser = Authoriser(
             topics=self._topics,
             session=self.session,
@@ -423,8 +441,69 @@ class BridgeNode(Node):  # type: ignore[misc]
             )
         return catalogue
 
+    def _joints_from_executor(self) -> JointInfo | None:
+        """The executor's :class:`JointInfo`, validated, or ``None`` when it announces none."""
+        try:
+            info = self._plugin.joints()
+        except Exception as error:
+            raise ConfigError(
+                f'executor.joints() raised {type(error).__name__}: {error}'
+            ) from error
+        if info is None:
+            return None
+        if not isinstance(info, JointInfo):
+            raise ConfigError(
+                f'executor.joints() must return a JointInfo or None, not {type(info).__name__}'
+            )
+        problems = validate_joint_info(info)
+        if problems:
+            raise ConfigError('the executor announces invalid joints: ' + '; '.join(problems))
+        return info
+
+    def _build_joints_publisher(self, info: JointInfo | None) -> JointsPublisher | None:
+        telemetry = self.settings.telemetry
+        if info is None:
+            self._bridge_logger.info('the executor announces no joints: no joint telemetry')
+            return None
+        if not telemetry.joints_enabled:
+            self._bridge_logger.info(
+                'telemetry.joints_rate_hz is 0: joint telemetry is off and the announce omits '
+                'the joints block'
+            )
+            return None
+        min_delta = telemetry.min_delta_for(info.unit)
+        publisher = JointsPublisher(
+            robot_id=self.settings.robot.id,
+            session=self.session,
+            instance=self.instance,
+            clock=self._bridge_clock,
+            scheduler=self._scheduler,
+            publish=self._publish_joints,
+            joint_count=info.count,
+            rate_hz=telemetry.joints_rate_hz,
+            min_delta=min_delta,
+            prefix=self.settings.topic_prefix,
+            logger=self._bridge_logger,
+        )
+        self._bridge_logger.info(
+            'joint telemetry: %d joint(s) in %s (%s), at most %g Hz, published when a joint '
+            'moves by more than %g %s',
+            info.count,
+            info.unit,
+            ', '.join(info.names),
+            telemetry.joints_rate_hz,
+            min_delta,
+            info.unit,
+        )
+        return publisher
+
     def _build_announce(self) -> Announce:
         robot = self.settings.robot
+        joints = None
+        if self._joint_info is not None and self._joints_publisher is not None:
+            joints = AnnounceJoints.from_joint_info(
+                self._joint_info, self.settings.telemetry.joints_rate_hz
+            )
         announce = Announce(
             robot_id=robot.id,
             name=robot.name,
@@ -442,6 +521,7 @@ class BridgeNode(Node):  # type: ignore[misc]
             watchdog_mode=self.settings.watchdog.mode,
             heartbeat_interval_s=self.settings.heartbeat_interval_s,
             tasks=self._authoriser.catalogue,
+            joints=joints,
             ts=self._bridge_clock.now_ms(),
         )
         size = len(encode_payload(announce.to_payload()))
@@ -547,6 +627,16 @@ class BridgeNode(Node):  # type: ignore[misc]
         return self._plugin
 
     @property
+    def joint_info(self) -> JointInfo | None:
+        """What the executor announced about its joints, or ``None``."""
+        return self._joint_info
+
+    @property
+    def joints_publisher(self) -> JointsPublisher | None:
+        """The joint telemetry throttle, or ``None`` when telemetry is off or there are no joints."""
+        return self._joints_publisher
+
+    @property
     def exit_future(self) -> Any:
         """Completes with the exit status when the node asks to end the process."""
         return self._exit_future
@@ -626,6 +716,8 @@ class BridgeNode(Node):  # type: ignore[misc]
             if handle is not None:
                 handle.cancel()
         self._connect_timeout = self._announce_timer = None
+        if self._joints_publisher is not None:
+            self._joints_publisher.close()
         self._watchdog.stop()
         self._manager.stop_health_polling()
         self._link.shutdown()
@@ -780,6 +872,9 @@ class BridgeNode(Node):  # type: ignore[misc]
         if self._closed:
             return
         self._publish_announce()
+        if self._joints_publisher is not None:
+            # Once per announce: the latest positions, whatever the delta.
+            self._joints_publisher.republish()
 
     def _on_connect_event(self, event: ConnectEvent) -> None:
         if self._connect_timeout is not None:
@@ -790,12 +885,18 @@ class BridgeNode(Node):  # type: ignore[misc]
         self._link.publish(self._topics.availability, AVAILABILITY_ONLINE, qos=1, retain=True)
         self._publish_announce()
         self._manager.publish_state()
+        # The burst is ordered: joints only ever go out after the retained state, so Home
+        # Assistant has the announce (and its joints block) before the first positions.
+        self._online = True
+        joints_sent = self._joints_publisher is not None and self._joints_publisher.republish()
         self._bridge_logger.info(
-            'connected (connect %d): availability online, announce and state published',
+            'connected (connect %d): availability online, announce and state published%s',
             self._link.connects,
+            ' with the latest joints' if joints_sent else '',
         )
 
     def _on_disconnect_event(self, event: DisconnectEvent) -> None:
+        self._online = False
         if event.exit_requested:
             self._request_exit(
                 EXIT_TAKEOVER, self._link.exit_reason or 'MQTT session taken over repeatedly'
@@ -823,6 +924,45 @@ class BridgeNode(Node):  # type: ignore[misc]
     def _publish_announce(self) -> bool:
         payload = replace(self._announce, ts=self._bridge_clock.now_ms()).to_payload()
         return self._link.publish_json(self._topics.announce, payload, 1, True, None)
+
+    def _publish_joints(
+        self, topic: str, payload: Any, qos: int, retain: bool, expiry_s: int | None
+    ) -> bool:
+        """The joints publisher's publish: QoS 0, only between the connect burst and the disconnect.
+
+        The gate is the main thread's own ``_online`` flag, not paho's
+        ``connected``, which its network thread raises before the connect
+        event is drained here: a report posted in that window (the fake
+        executor's starting pose from ``setup`` is one) must not reach the wire
+        before availability, announce and state. The publisher keeps the sample
+        and consumes no ``seq``; the connect burst republishes it. The
+        ``connected`` check behind it saves a QoS 0 message, which paho would
+        lose and count, in the opposite window before the disconnect event.
+        """
+        if not self._online:
+            self._bridge_logger.debug(
+                'joints report before the connect burst; republished after it'
+            )
+            return False
+        if not self._link.connected:
+            self._bridge_logger.debug('joints report while disconnected; republished on connect')
+            return False
+        return self._link.publish_json(topic, payload, qos, retain, expiry_s)
+
+    def _on_joints_report(
+        self, positions: Sequence[float], velocities: Sequence[float] | None
+    ) -> None:
+        """``ctx.report_joints`` after the post: hand the sample to the throttle (main thread)."""
+        publisher = self._joints_publisher
+        if publisher is None:
+            if not self._joints_ignored_logged:
+                self._joints_ignored_logged = True
+                self._bridge_logger.info(
+                    'the executor reports joint positions but joint telemetry is off '
+                    '(telemetry.joints_rate_hz is 0 or the executor announced no joints); ignored'
+                )
+            return
+        publisher.report(positions, velocities)
 
     def _publish_heartbeat(self) -> None:
         if not self._link.connected:

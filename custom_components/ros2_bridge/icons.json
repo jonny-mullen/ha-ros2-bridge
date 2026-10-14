@@ -19,6 +19,9 @@
           "timeout": "mdi:timer-alert-outline",
           "lost": "mdi:help-circle-outline"
         }
+      },
+      "joint": {
+        "default": "mdi:angle-acute"
       }
     },
     "binary_sensor": {

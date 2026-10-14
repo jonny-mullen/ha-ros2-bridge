@@ -58,6 +58,7 @@ KINDS: tuple[str, ...] = (
     "feedback",
     "result",
     "sensor",
+    "joints",
 )
 SCHEMA_FILES: tuple[str, ...] = ("common", *KINDS)
 

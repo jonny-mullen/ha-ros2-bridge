@@ -108,6 +108,17 @@
     heartbeat:
       # Period of the robot heartbeat; 0 disables it.
       interval_s: 2.0
+    telemetry:
+      # Joint telemetry (0.2.0), for an executor that announces joints (the fake does: seven
+      # joints in degrees). Most joints messages per second on {prefix}/{robot.id}/joints;
+      # 0 disables the topic and the announce omits its joints block, so Home Assistant makes
+      # no joint sensors.
+      joints_rate_hz: 2.0
+      # Least movement of any one joint, in the announced unit, that publishes a new message;
+      # 0 (the default) means the unit's default, 0.5 for deg and 0.01 for rad, so use a tiny
+      # positive value such as 0.001 to publish every change. A (re)connect and every announce
+      # publish the latest positions once whatever the movement.
+      joints_min_delta: 0.0
     watchdog:
       # none (informational), inhibit_new or stop_and_hold when the HA heartbeat stops.
       mode: none

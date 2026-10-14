@@ -53,6 +53,7 @@ from custom_components.ros2_bridge.const import (
     feedback_filter,
     ha_heartbeat_topic,
     heartbeat_filter,
+    joints_filter,
     result_filter,
     state_filter,
     state_topic,
@@ -152,7 +153,7 @@ async def test_setup_registers_services_intents_and_the_container(
     assert hass.data[DOMAIN][DATA_HUB] is hub, "the services' primary lookup finds the hub"
 
 
-async def test_setup_subscribes_seven_filters_and_becomes_ready(
+async def test_setup_subscribes_eight_filters_and_becomes_ready(
     hass: HomeAssistant,
     mqtt_setup: Any,
     make_config_entry: Callable[..., MockConfigEntry],
@@ -168,6 +169,7 @@ async def test_setup_subscribes_seven_filters_and_becomes_ready(
         (ack_filter(PREFIX), 1),
         (result_filter(PREFIX), 1),
         (feedback_filter(PREFIX), 0),
+        (joints_filter(PREFIX), 0),
     ]
     assert hub.subscriptions == expected
     # The MQTT integration subscribes to its own discovery topics as well (including the

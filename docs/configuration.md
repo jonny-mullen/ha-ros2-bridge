@@ -95,6 +95,17 @@ A certificate file that does not exist is a fatal start-up error (the node refus
 | `watchdog.mode` | `none` | What losing Home Assistant's heartbeat does; see below. |
 | `watchdog.timeout_s` | `5.0` | Seconds without a Home Assistant heartbeat before the link counts as down. Clamped to at least 2.5 times the interval Home Assistant announces, so a slow heartbeat never trips the watchdog by itself. |
 
+## Joint telemetry (0.2.0)
+
+Read only when the executor announces joints (`TaskExecutor.joints()` returns a `JointInfo`; the fake executor does, with seven joints in degrees, and the MoveIt executor does for the group's joints in radians). The positions travel on `{prefix}/{robot.id}/joints` at QoS 0, never retained, with a 5 s Message Expiry Interval, and Home Assistant shows them as one sensor per joint (`docs/sensors.md` has the recorder exclude for installations that do not want them in history).
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `telemetry.joints_rate_hz` | `2.0` | The most `joints` messages per second. `0` switches joint telemetry off: nothing is published, the announce omits its `joints` block and Home Assistant creates no joint sensors (and removes any it had). |
+| `telemetry.joints_min_delta` | `0.0` | The least movement of any one joint, in the announced unit, that publishes a new message. `0` (the default) means the unit's own default: `0.5` for `deg`, `0.01` for `rad`; it cannot mean "every change", so set a tiny positive value such as `0.001` for that (the start-up log names the effective delta). A (re)connect and every announce publish the latest positions once whatever the movement, and a report that arrives inside the rate interval is held and published when the interval has passed, so the final pose of a motion always goes out. |
+
+The executor reports as often as its driver does; the node drops what the two rules above do not need, so a 500 Hz `joint_states` stream costs two messages a second on the broker. `seq` increments per publication within a session and Home Assistant drops a regressing copy.
+
 ### Watchdog modes
 
 Home Assistant publishes `{prefix}/ha/heartbeat` every two seconds while its MQTT client is connected. The node tracks it, exposes the result as `ha_link` (`up` or `down`) in its state and on the latched ROS topic `~/ha_link`, and applies `watchdog.mode`:
@@ -119,8 +130,10 @@ Nothing on MQTT is an emergency stop. The modes exist for adopters whose safety 
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `fake.task_duration_s` | `2.0` | How long `reset`, `move_to` and `fail` take. |
-| `fake.feedback_hz` | `2` | Feedback rate of a running fake motion task; `0` disables feedback. |
+| `fake.task_duration_s` | `2.0` | How long `reset`, `move_to` and `fail` take, which is also how long the seven simulated joints take to reach the target pose. |
+| `fake.feedback_hz` | `2` | Feedback rate of a running fake motion task; `0` disables feedback. The joints are reported on the same ticks (and at the end of every motion), so `0` also stops the joints moving on the dashboard until the task ends. |
+
+The fake's joints are `j1` to `j7` in degrees, limited to [-170, 170] except `j4` and `j6` at [-120, 120]; the named poses `move_to` accepts are `home`, `pick`, `place` and `wave`, and the arm starts at `home`. There is nothing to configure about them.
 
 ## MoveIt executor (experimental)
 
@@ -135,6 +148,8 @@ Read by `executor: moveit` (`ros2_ha_bridge/executors/moveit.py`), which has bee
 | `moveit.velocity_scale`, `moveit.acceleration_scale` | `0.1`, `0.1` | The two scaling factors, in (0, 1]. |
 | `moveit.action_name` | `/move_action` | The MoveGroup action. |
 | `moveit.hold_on_cancel` | `true` | Whether a cancelled task finishes, and the `stop` task clears a robot error, only once move_group confirms the goal ended. |
+| `moveit.joint_states_topic` | `/joint_states` | The `sensor_msgs/JointState` topic the joint telemetry (0.2.0) is read from, with the sensor-data QoS (best effort). |
+| `moveit.joint_names` | `[]` | The joints reported to Home Assistant, in order, in radians and without limits. Empty means the joints of the first configured pose in their written order. Names are announced lower-cased with other characters replaced by `_`; if two names collapse into one, or a name has nothing left, the telemetry is switched off with a warning. |
 
 These are read from `ctx.parameters` when present and otherwise declared by the executor on the node; see `docs/writing-an-executor.md`, Parameters.
 

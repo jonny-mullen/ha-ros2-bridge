@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>ros2_ha_bridge</name>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
   <description>
     ROS 2 side of ha-ros2-bridge: one node per robot that announces the robot to Home
     Assistant over MQTT, authorises and runs tasks through a TaskExecutor plugin, and
@@ -17,6 +17,8 @@
   <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>action_msgs</exec_depend>
+  <!-- sensor_msgs/JointState feeds the moveit executor's joint telemetry; it ships with ros-base. -->
+  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>ros2launch</exec_depend>

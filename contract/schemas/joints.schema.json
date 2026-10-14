@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ha-ros2-bridge.invalid/contract/1/joints.schema.json",
+  "title": "joints",
+  "description": "Topic {prefix}/{robot_id}/joints, ROS to HA, QoS 0, not retained, message expiry 5 s. Added 2026-10-14 (0.2.0) as an optional, additive part of schema 1. Joint positions in the unit and order of the announce joints block; published only by a node whose announce carries that block, at most telemetry.joints_rate_hz times per second (default 2), only when a position moved by more than telemetry.joints_min_delta since the last publish, plus once on every (re)connect and announce. seq increments per publication within a session and HA drops a regressing seq within the same session. HA shows the values as one sensor per joint and never records them by default.",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "$ref": "common.schema.json#/$defs/schema_version"
+    },
+    "robot_id": {
+      "$ref": "common.schema.json#/$defs/robot_id"
+    },
+    "positions": {
+      "description": "One position per announced joint, in the announced unit and in the order of the announced names. The length must equal the number of announced names; a schema cannot check that against another message, so both halves check it in code and HA drops a payload whose length differs.",
+      "type": "array",
+      "items": {
+        "type": "number"
+      },
+      "minItems": 1,
+      "maxItems": 32
+    },
+    "velocities": {
+      "description": "null when the executor reports no velocities, otherwise one velocity per announced joint in the announced unit per second, same length and order as positions.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 1,
+          "maxItems": 32
+        }
+      ]
+    },
+    "session": {
+      "$ref": "common.schema.json#/$defs/session"
+    },
+    "instance": {
+      "$ref": "common.schema.json#/$defs/instance"
+    },
+    "seq": {
+      "$ref": "common.schema.json#/$defs/counter"
+    },
+    "ts": {
+      "$ref": "common.schema.json#/$defs/epoch_ms"
+    }
+  },
+  "required": ["schema", "robot_id", "positions", "velocities", "session", "instance", "seq", "ts"],
+  "additionalProperties": true
+}

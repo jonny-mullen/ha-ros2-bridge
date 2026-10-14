@@ -4,7 +4,25 @@ All notable changes to ha-ros2-bridge are recorded here. The format follows Keep
 
 ## [Unreleased]
 
-Nothing yet.
+### 2026-10-14 (towards 0.2.0)
+
+Joint telemetry: an additive extension of contract schema 1 so that a dashboard can show each arm's articulation (`docs/decisions.md`, revising interview decision Q17). Nothing that existed in 0.1.0 changed: a 0.1.0 Home Assistant ignores the new announce block and never subscribes to the new topic, and a 0.1.0 node never publishes either. Not yet exercised on a live broker or opened on a live Home Assistant; no tag yet.
+
+#### Added
+
+- Contract: the optional `joints` block in `announce` (`unit` deg or rad, 1 to 32 `names`, `limits` null or one pair per name, `rate_hz`), the `{prefix}/{robot_id}/joints` payload (QoS 0, never retained, MQTT 5 message expiry 5 s; `positions`, `velocities`, `session`, `instance`, `seq`, `ts`), `contract/schemas/joints.schema.json`, the shared definitions, golden and must-reject examples, and the vendored copies in the ROS 2 package.
+- ROS 2 node: the parameters `telemetry.joints_rate_hz` (default 2.0; 0 disables publishing and the announce omits `joints`) and `telemetry.joints_min_delta` (default 0, meaning the unit's own default: 0.5 for degrees, 0.01 for radians); `TaskExecutor.joints()` returning a frozen `JointInfo` (names, unit, limits) or `None`, called once after `setup`; the thread-safe `BridgeContext.report_joints(positions, velocities=None)`; the node throttles to the rate, publishes on change only plus once on every (re)connect and announce, and numbers each publication with `seq` within the session.
+- Fake executor: seven joints `j1` to `j7` in degrees, limits -170 to 170 except `j4` and `j6` at -120 to 120, the named poses home, pick, place and wave; `reset` and `move_to` interpolate linearly from the current positions over `fake.task_duration_s` with a report every `1/fake.feedback_hz` seconds, `wait` holds, `fail` moves halfway and aborts, `pause` freezes and `resume` continues; positions persist across tasks and the unknown-pose rejection stays.
+- MoveIt executor: the adapter subscribes to `sensor_msgs/JointState` on `moveit.joint_states_topic` (default `/joint_states`) and forwards the positions of the group's joints, named from the first poses entry or `moveit.joint_names`, in radians with no limits; the node throttles.
+- Home Assistant: a subscription to `{prefix}/+/joints` at QoS 0 (eight filters in all); one sensor per announced joint (unique id `{robot_id}_joint_{index}`, name "Joint {index + 1} {joint name}", unit ° or rad, display precision 1, no state class, attributes `index`, `joint_name`, `limit_min`, `limit_max`, enabled by default), unavailable with the robot, removed when a later announce drops the joint or the key; `seq` regressions within a session are dropped; diagnostics show the latest positions and the joints `seq`.
+- `docs/examples/dashboard.yaml` and `docs/dashboard.md`: a phone-first Lovelace dashboard for the two fake arms (an Overview with the state, the task buttons and the last result per arm, and one view per arm with its status, seven gauges with the announced limits, the task and pose buttons, a 30-minute history graph and the task-result logbook), native cards only, with a leading comment on installing it and adapting it to other robots.
+- Documentation: the joints path and the recorder exclude (`entity_globs: sensor.*_joint_*`) in `docs/sensors.md`; the joint sensors and the recorder note in `docs/install-ha.md`; the new payloads in `docs/mqtt-contract.md` and `contract/README.md`; the feature and the new pages in `README.md`.
+
+#### Changed
+
+- Version strings to 0.2.0 in `manifest.json`, `const.py`, `package.xml`, `setup.py` and `ros2_ha_bridge/__init__.py`.
+- `docs/decisions.md`: the 2026-10-14 joint telemetry decision.
+- Repair pass, same day: the node's connect burst is ordered availability, announce, state, joints, and a joints report is held until the main thread has handled the connect (it was gated on paho's own flag, so a report posted from the executor's `setup` could reach the wire before the announce and be dropped by Home Assistant); Home Assistant drops a joints payload whose `velocities` are not one per position, as the contract says, and on the first announce after a start removes the registry entries of joint sensors that were dropped while it was stopped; `scripts/check_versions.py` accepts version strings that run ahead of the last `CHANGELOG.md` release heading while `## [Unreleased]` has content (the release workflow's `--released` still insists on the heading); `docs/failure-modes.md` gains the joints row; the README, architecture and troubleshooting pages say eight subscriptions.
 
 ## [0.1.0] - 2026-10-14
 

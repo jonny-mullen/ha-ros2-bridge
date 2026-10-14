@@ -15,6 +15,7 @@ from custom_components.ros2_bridge.const import (
     CommandType,
     HaLink,
     HealthLevel,
+    JointUnit,
     ResultStatus,
     RobotStatus,
     TaskKind,
@@ -29,9 +30,13 @@ from .common import (
     VECTOR_SECRET,
     GoldenExample,
     announce_payload,
+    announce_with_joints_payload,
     encode,
+    joints_block,
+    joints_payload,
     load_examples,
     make_announce,
+    make_joints,
     make_result,
     state_payload,
 )
@@ -172,6 +177,154 @@ def test_result_fields(valid_result_example: GoldenExample) -> None:
 def test_feedback_fields(valid_feedback_example: GoldenExample) -> None:
     feedback = protocol.decode_feedback(valid_feedback_example.wire)
     assert feedback.progress == valid_feedback_example.payload["progress"]
+
+
+def test_announce_without_the_key_has_no_joints() -> None:
+    announce = make_announce()
+    assert announce.joints is None
+    assert announce.joints_ignored is None
+    assert announce.to_dict()["joints"] is None
+
+
+def test_announce_with_joints_decodes_the_block() -> None:
+    golden_block = joints_block()
+    announce = protocol.decode_announce(encode(announce_with_joints_payload()))
+    info = announce.joints
+    assert info is not None
+    assert announce.joints_ignored is None
+    assert info.unit is JointUnit.DEG
+    assert info.unit_symbol == "°"
+    assert info.names == ("j1", "j2", "j3", "j4", "j5", "j6", "j7")
+    assert info.count == 7
+    assert info.rate_hz == 2.0
+    assert info.limits is not None and len(info.limits) == 7
+    assert info.limit(0) == (-170.0, 170.0)
+    assert info.limit(3) == (-120.0, 120.0)
+    assert info.limit(5) == (-120.0, 120.0)
+    assert info.joint_key(3) == ("j4", "deg", (-120.0, 120.0))
+    assert info.to_dict() == golden_block
+    assert announce.to_dict()["joints"] == golden_block
+
+    # Limits may be absent altogether; the sensors then carry no bounds.
+    announce = protocol.decode_announce(encode(announce_with_joints_payload(joints={
+        **golden_block, "limits": None, "unit": "rad"
+    })))  # fmt: skip
+    assert announce.joints is not None
+    assert announce.joints.limits is None
+    assert announce.joints.limit(2) is None
+    assert announce.joints.unit_symbol == "rad"
+    assert announce.joints.joint_key(2) == ("j3", "rad", None)
+
+
+def test_announce_joints_with_mismatched_limits_is_kept_without_joints() -> None:
+    """A limits list of the wrong length is not a schema failure: the block is ignored, with a reason."""
+    block = joints_block()
+    block["limits"] = block["limits"][:-1]
+    announce = protocol.decode_announce(encode(announce_with_joints_payload(joints=block)))
+    assert announce.robot_id == ROBOT_ID
+    assert announce.joints is None
+    assert announce.joints_ignored == (
+        "joints.limits has 6 entries for 7 names; the block is ignored"
+    )
+    assert announce.to_dict()["joints_ignored"] == announce.joints_ignored
+
+
+@pytest.mark.parametrize(
+    ("block", "fragment"),
+    [
+        ("not an object", "joints must be an object"),
+        ({"unit": "grad"}, "unit"),
+        ({"names": []}, "1 to 32"),
+        ({"names": [f"j{n}" for n in range(33)]}, "1 to 32"),
+        ({"names": "j1"}, "names must be a list"),
+        ({"names": ["J1"]}, "names\\[0\\]"),
+        ({"names": ["j1", 2]}, "names\\[1\\]"),
+        ({"limits": "wide"}, "limits must be null"),
+        ({"limits": [[1]]}, "limits\\[0\\]"),
+        ({"limits": [[1, "a"]]}, "limits\\[0\\]"),
+        ({"limits": [[1, True]]}, "limits\\[0\\]"),
+        ({"rate_hz": 0}, "rate_hz"),
+        ({"rate_hz": ...}, "rate_hz is missing"),
+        ({"unit": ...}, "unit is missing"),
+    ],
+)
+def test_announce_joints_structural_errors(block: Any, fragment: str) -> None:
+    """Anything the schema refuses in the block refuses the whole announce."""
+    if isinstance(block, dict):
+        full = joints_block()
+        for key, value in block.items():
+            if value is ...:
+                del full[key]
+            else:
+                full[key] = value
+        if "limits" in block and block["limits"] is not None and "names" not in block:
+            full["names"] = full["names"][: len(block["limits"])]
+        block = full
+    with pytest.raises(ProtocolError, match=fragment):
+        protocol.decode_announce(encode(announce_with_joints_payload(joints=block)))
+
+
+def test_joints_fields(valid_joints_example: GoldenExample) -> None:
+    joints = protocol.decode_joints(valid_joints_example.wire)
+    payload = valid_joints_example.payload
+    assert joints.robot_id == payload["robot_id"]
+    assert list(joints.positions) == payload["positions"]
+    velocities = payload["velocities"]
+    assert (None if joints.velocities is None else list(joints.velocities)) == velocities
+    assert joints.session == payload["session"]
+    assert joints.instance == payload["instance"]
+    assert joints.seq == payload["seq"]
+    assert joints.ts == payload["ts"]
+    assert joints.to_dict()["positions"] == payload["positions"]
+    assert joints.to_dict()["seq"] == payload["seq"]
+
+
+def test_joints_payload_builder_points_at_the_test_robot() -> None:
+    joints = make_joints()
+    assert joints.robot_id == ROBOT_ID
+    assert joints.positions == (12.5, -34.0, 90.25, -45.5, 0.0, 60.75, -10.0)
+    assert joints.velocities is None
+    assert joints.seq == 7
+    assert isinstance(joints.positions[0], float)
+    with_velocities = make_joints(velocities=[0, 1, 2, 3, 4, 5, 6])
+    assert with_velocities.velocities == (0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "fragment"),
+    [
+        ({"positions": []}, "positions must hold 1 to 32"),
+        ({"positions": [0.0] * 33}, "positions must hold 1 to 32"),
+        ({"positions": [1.0, True]}, "positions must hold numbers only"),
+        ({"positions": [1.0, "2"]}, "positions must hold numbers only"),
+        ({"positions": "1,2,3"}, "positions must be a list"),
+        ({"positions": ...}, "positions is missing"),
+        ({"velocities": []}, "velocities must hold 1 to 32"),
+        ({"velocities": [0.0, "x"]}, "velocities must hold numbers only"),
+        ({"velocities": 0.5}, "velocities must be a list"),
+        ({"velocities": ...}, "velocities is missing"),
+        ({"robot_id": "ha"}, "robot_id"),
+        ({"session": "nope"}, "session"),
+        ({"instance": "robotpc"}, "instance"),
+        ({"seq": -1}, "seq"),
+        ({"seq": 1.5}, "seq"),
+        ({"ts": ...}, "ts is missing"),
+    ],
+)
+def test_joints_structural_errors(overrides: dict[str, Any], fragment: str) -> None:
+    with pytest.raises(ProtocolError, match=fragment) as excinfo:
+        protocol.decode_joints(encode(joints_payload(**overrides)))
+    assert excinfo.value.kind == "joints"
+
+
+def test_joints_nan_and_size_limit_are_refused() -> None:
+    raw = encode(joints_payload()).replace(b"12.5", b"NaN")
+    with pytest.raises(ProtocolError, match="not JSON"):
+        protocol.decode_joints(raw)
+    padded = joints_payload(padding="x" * (16 * 1024))
+    with pytest.raises(ProtocolError, match="over the limit"):
+        protocol.decode_joints(encode(padded))
+    assert protocol.decode_joints(encode(joints_payload(future="field"))).seq == 7
 
 
 def test_availability_is_exact() -> None:

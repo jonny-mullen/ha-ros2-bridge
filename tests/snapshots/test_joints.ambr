@@ -1,0 +1,418 @@
+# serializer version: 1
+# name: test_announce_with_joints_creates_seven_sensors[entity_ids]
+  list([
+    'sensor.kitchen_left_arm_joint_1_j1',
+    'sensor.kitchen_left_arm_joint_2_j2',
+    'sensor.kitchen_left_arm_joint_3_j3',
+    'sensor.kitchen_left_arm_joint_4_j4',
+    'sensor.kitchen_left_arm_joint_5_j5',
+    'sensor.kitchen_left_arm_joint_6_j6',
+    'sensor.kitchen_left_arm_joint_7_j7',
+  ])
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_1_j1-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_joint_1_j1',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Joint 1 j1',
+    'options': dict({
+      'sensor': dict({
+        'suggested_display_precision': 1,
+      }),
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Joint 1 j1',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'joint',
+    'unique_id': 'arm_left_joint_0',
+    'unit_of_measurement': '°',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_1_j1-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Joint 1 j1',
+      'index': 0,
+      'joint_name': 'j1',
+      'limit_max': 170.0,
+      'limit_min': -170.0,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '°',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_joint_1_j1',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_2_j2-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_joint_2_j2',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Joint 2 j2',
+    'options': dict({
+      'sensor': dict({
+        'suggested_display_precision': 1,
+      }),
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Joint 2 j2',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'joint',
+    'unique_id': 'arm_left_joint_1',
+    'unit_of_measurement': '°',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_2_j2-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Joint 2 j2',
+      'index': 1,
+      'joint_name': 'j2',
+      'limit_max': 170.0,
+      'limit_min': -170.0,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '°',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_joint_2_j2',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_3_j3-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_joint_3_j3',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Joint 3 j3',
+    'options': dict({
+      'sensor': dict({
+        'suggested_display_precision': 1,
+      }),
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Joint 3 j3',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'joint',
+    'unique_id': 'arm_left_joint_2',
+    'unit_of_measurement': '°',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_3_j3-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Joint 3 j3',
+      'index': 2,
+      'joint_name': 'j3',
+      'limit_max': 170.0,
+      'limit_min': -170.0,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '°',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_joint_3_j3',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_4_j4-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_joint_4_j4',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Joint 4 j4',
+    'options': dict({
+      'sensor': dict({
+        'suggested_display_precision': 1,
+      }),
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Joint 4 j4',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'joint',
+    'unique_id': 'arm_left_joint_3',
+    'unit_of_measurement': '°',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_4_j4-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Joint 4 j4',
+      'index': 3,
+      'joint_name': 'j4',
+      'limit_max': 120.0,
+      'limit_min': -120.0,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '°',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_joint_4_j4',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_5_j5-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_joint_5_j5',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Joint 5 j5',
+    'options': dict({
+      'sensor': dict({
+        'suggested_display_precision': 1,
+      }),
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Joint 5 j5',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'joint',
+    'unique_id': 'arm_left_joint_4',
+    'unit_of_measurement': '°',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_5_j5-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Joint 5 j5',
+      'index': 4,
+      'joint_name': 'j5',
+      'limit_max': 170.0,
+      'limit_min': -170.0,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '°',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_joint_5_j5',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_6_j6-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_joint_6_j6',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Joint 6 j6',
+    'options': dict({
+      'sensor': dict({
+        'suggested_display_precision': 1,
+      }),
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Joint 6 j6',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'joint',
+    'unique_id': 'arm_left_joint_5',
+    'unit_of_measurement': '°',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_6_j6-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Joint 6 j6',
+      'index': 5,
+      'joint_name': 'j6',
+      'limit_max': 120.0,
+      'limit_min': -120.0,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '°',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_joint_6_j6',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_7_j7-entry]
+  EntityRegistryEntrySnapshot({
+    'aliases': list([
+      None,
+    ]),
+    'area_id': None,
+    'capabilities': None,
+    'config_entry_id': <ANY>,
+    'config_subentry_id': <ANY>,
+    'device_class': None,
+    'device_id': <ANY>,
+    'disabled_by': None,
+    'domain': 'sensor',
+    'entity_category': None,
+    'entity_id': 'sensor.kitchen_left_arm_joint_7_j7',
+    'has_entity_name': True,
+    'hidden_by': None,
+    'icon': None,
+    'id': <ANY>,
+    'labels': set({
+    }),
+    'name': None,
+    'object_id_base': 'Joint 7 j7',
+    'options': dict({
+      'sensor': dict({
+        'suggested_display_precision': 1,
+      }),
+    }),
+    'original_device_class': None,
+    'original_icon': None,
+    'original_name': 'Joint 7 j7',
+    'platform': 'ros2_bridge',
+    'previous_unique_id': None,
+    'suggested_object_id': None,
+    'supported_features': 0,
+    'translation_key': 'joint',
+    'unique_id': 'arm_left_joint_6',
+    'unit_of_measurement': '°',
+  })
+# ---
+# name: test_announce_with_joints_creates_seven_sensors[sensor.kitchen_left_arm_joint_7_j7-state]
+  StateSnapshot({
+    'attributes': ReadOnlyDict({
+      <EntityStateAttribute.FRIENDLY_NAME: 'friendly_name'>: 'Left arm Joint 7 j7',
+      'index': 6,
+      'joint_name': 'j7',
+      'limit_max': 170.0,
+      'limit_min': -170.0,
+      <EntityStateAttribute.UNIT_OF_MEASUREMENT: 'unit_of_measurement'>: '°',
+    }),
+    'context': <ANY>,
+    'entity_id': 'sensor.kitchen_left_arm_joint_7_j7',
+    'last_changed': <ANY>,
+    'last_reported': <ANY>,
+    'last_updated': <ANY>,
+    'state': 'unknown',
+  })
+# ---

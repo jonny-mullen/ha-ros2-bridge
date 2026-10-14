@@ -23,6 +23,7 @@ Contract version: schema 1. Schema 1 only ever gains optional fields.
 | `{prefix}/{robot_id}/availability` | ROS to HA | 1 | yes | none | `online` on connect; `offline` as the Last Will and on clean shutdown. |
 | `{prefix}/{robot_id}/state` | ROS to HA | 1 | yes | none | On change and on (re)connect. |
 | `{prefix}/{robot_id}/heartbeat` | ROS to HA | 0 | no | 5 s | Every `heartbeat.interval_s` (default 2; 0 disables, and HA then does no staleness tracking). |
+| `{prefix}/{robot_id}/joints` | ROS to HA | 0 | no | 5 s | Optional (0.2.0). Joint positions in the unit and order of the announce `joints` block. Only from a node whose announce carries that block; at most `telemetry.joints_rate_hz` per second (default 2), only on a change above `telemetry.joints_min_delta`, plus once on every (re)connect and announce. |
 | `{prefix}/{robot_id}/cmd` | HA to ROS | 1 | never | `ceil(max_age_ms / 1000)` | The node subscribes with `SubscribeOptions(qos=1, retainAsPublished=True)`, so a planted retained copy is seen with the RETAIN flag both live and at reconnect, dropped, counted and cleared with an empty retained publish. The node's own clearing echo (empty payload) is ignored silently. |
 | `{prefix}/{robot_id}/task/{task_id}/ack` | ROS to HA | 1 | yes | `reply.ack_expiry_s` (120) | One distinct ack per id; a duplicate command republishes the stored ack bytes. |
 | `{prefix}/{robot_id}/task/{task_id}/feedback` | ROS to HA | 0 | no | 10 s | Optional, throttled to `reply.feedback_max_rate_hz` (2). |
@@ -34,7 +35,7 @@ Contract version: schema 1. Schema 1 only ever gains optional fields.
 
 ### Subscriptions
 
-- HA subscribes once at setup to `{prefix}/+/announce`, `{prefix}/+/availability`, `{prefix}/+/state`, `{prefix}/+/heartbeat`, `{prefix}/+/task/+/ack` and `{prefix}/+/task/+/result` at QoS 1, and to `{prefix}/+/task/+/feedback` at QoS 0. Every wildcard handler first checks the robot segment against the pattern and discards `ha`. Subscription completion on the ack and result filters gates the hub's readiness (bounded at 10 s).
+- HA subscribes once at setup to `{prefix}/+/announce`, `{prefix}/+/availability`, `{prefix}/+/state`, `{prefix}/+/heartbeat`, `{prefix}/+/task/+/ack` and `{prefix}/+/task/+/result` at QoS 1, and to `{prefix}/+/task/+/feedback` and `{prefix}/+/joints` at QoS 0. Every wildcard handler first checks the robot segment against the pattern and discards `ha`. Subscription completion on the ack and result filters gates the hub's readiness (bounded at 10 s).
 - The node subscribes to its own `cmd` (QoS 1, Retain As Published), to `{prefix}/ha/heartbeat`, to `homeassistant/status`, and to each `mirror.topics` entry plus its availability sibling (QoS 0).
 
 ## Payloads
@@ -80,6 +81,12 @@ Topic `ros2_bridge/arm_left/announce`, QoS 1, retained.
       }
     }
   ],
+  "joints": {
+    "unit": "deg",
+    "names": ["j1", "j2", "j3", "j4", "j5", "j6", "j7"],
+    "limits": [[-170, 170], [-170, 170], [-170, 170], [-120, 120], [-170, 170], [-120, 120], [-170, 170]],
+    "rate_hz": 2.0
+  },
   "ts": 1791892800000
 }
 ```
@@ -88,6 +95,7 @@ Topic `ros2_bridge/arm_left/announce`, QoS 1, retained.
 - `kind` is `motion` (rejected while busy, in error or inhibited; owns the single active slot), `control` (accepted in any state: stop, pause, resume) or `query` (accepted in any state, no motion).
 - `params` is a JSON Schema subset: `type: object`, `properties` whose `type` is one of string, number, integer or boolean, optional `enum`, `minimum` and `maximum`, plus `required`. It is validated by hand-written code on both sides, not by a general JSON Schema library.
 - `capabilities.hmac_required` tells HA whether the node will refuse unsigned commands.
+- `joints` is optional (added 2026-10-14, 0.2.0) and describes the telemetry on the `joints` topic: `unit` is `deg` or `rad`; `names` lists 1 to 32 joint names (same pattern as a task name) in publication order; `limits` is null or one `[minimum, maximum]` pair per name in that unit; `rate_hz` is the node's maximum publish rate (`telemetry.joints_rate_hz`, default 2). The block above is what the fake executor announces: seven joints `j1` to `j7` in degrees, `j4` and `j6` limited to 120 degrees. A robot without joints, or a node with the rate set to 0, omits the key. The schema cannot compare the lengths of `limits` and `names`; both halves check that in code and HA ignores a block whose lengths differ. HA creates one sensor per joint (unique id `{robot_id}_joint_{index}`, index from 0, unit `°` or `rad`), removes those a later announce no longer lists, and removes them all when a later announce drops the key.
 - An empty retained payload on this topic is a tombstone: HA removes the device. A second tombstone for an unknown robot is a no-op.
 
 ### availability
@@ -165,6 +173,29 @@ Topic `ros2_bridge/ha/heartbeat`, QoS 0, not retained, Message Expiry Interval 5
   "instance_id": "c2a4f6e8-1b3d-4f5a-9c7e-2d4f6a8b0c1e"
 }
 ```
+
+### joints (ROS to HA, optional)
+
+Topic `ros2_bridge/arm_left/joints`, QoS 0, not retained, Message Expiry Interval 5 s. Added 2026-10-14 (0.2.0) as an additive part of schema 1; published only by a node whose announce carries a `joints` block.
+
+```json
+{
+  "schema": 1,
+  "robot_id": "arm_left",
+  "positions": [12.5, -34.0, 90.25, -45.5, 0.0, 60.75, -10.0],
+  "velocities": null,
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc:4123",
+  "seq": 7,
+  "ts": 1791892803500
+}
+```
+
+- `positions` holds one number per announced joint, in the announced unit and in the order of the announced `names`. `velocities` is null or one number per position in the announced unit per second.
+- The node publishes at most `telemetry.joints_rate_hz` times per second (default 2.0; 0 disables publishing and the announce then omits `joints`), only when some position moved by more than `telemetry.joints_min_delta` (default 0.5 for `deg`, 0.01 for `rad`) since the last publish, plus once on every (re)connect and announce. The executor reports positions through `BridgeContext.report_joints`; the node does the throttling.
+- `seq` increments per publication within a session. HA drops a payload whose `seq` regresses within the same session, one whose `positions` length differs from the announced `names`, and one whose `velocities` are not one per position; none of these is a schema failure.
+- HA shows the values as one sensor per joint and keeps the last value until the robot itself goes unavailable; a stalled joints stream alone changes nothing. The sensors are enabled by default and `docs/sensors.md` shows the recorder exclude (`entity_globs: sensor.*_joint_*`) for installations that do not want them in history.
+- Nothing here is a safety signal: a position on this topic is a display value with a 5 s expiry, not a command input.
 
 ### cmd, type task
 
@@ -430,3 +461,4 @@ The full table, with a test id per row, is `docs/failure-modes.md`; `scripts/che
 - `schema` stays at 1 for as long as every change is additive: new optional fields, or new values in an open vocabulary (result `code`, `source.kind`, heartbeat counters). The ack code set, result `status`, task `kind` and `state` are closed; adding a value to any of them is schema 2 on a new `$id` base, published alongside schema 1 with a migration note.
 - A change that removes a field, changes a type, or changes the meaning of an existing value is a new schema number and a new major version of both halves.
 - `scripts/check_versions.py` keeps the bridge version in `manifest.json`, `package.xml`, `setup.py` and the announce payload in agreement.
+- Additive changes so far within schema 1: 2026-10-14 (0.2.0), joint telemetry. The optional `joints` block in `announce`, the `joints` payload on `{prefix}/{robot_id}/joints`, and the shared definitions `joint_unit`, `joint_name` and `joint_limits`. A 0.1.0 Home Assistant ignores the block and never subscribes to the topic; a 0.1.0 node never publishes either, and a 0.2.0 Home Assistant then makes no joint sensors. Nothing that existed in 0.1.0 changed.

@@ -140,6 +140,8 @@
             'heartbeat_interval_s': 2.0,
             'hw_version': None,
             'instance': 'robotpc:4123',
+            'joints': None,
+            'joints_ignored': None,
             'manufacturer': 'Example Robotics',
             'model': 'UR3e',
             'name': 'Left arm',
@@ -227,6 +229,7 @@
           'heartbeat_stale': False,
           'heartbeat_unavailable': False,
           'instance': 'robotpc:4123',
+          'joints': None,
           'last_ack': dict({
             'accepted': False,
             'clock_skew_ms': 5000,
@@ -308,6 +311,10 @@
         ]),
         list([
           'ros2_bridge/+/task/+/feedback',
+          0,
+        ]),
+        list([
+          'ros2_bridge/+/joints',
           0,
         ]),
       ]),
@@ -434,6 +441,8 @@
         'heartbeat_interval_s': 2.0,
         'hw_version': None,
         'instance': 'robotpc:4123',
+        'joints': None,
+        'joints_ignored': None,
         'manufacturer': 'Example Robotics',
         'model': 'UR3e',
         'name': 'Left arm',
@@ -521,6 +530,7 @@
       'heartbeat_stale': False,
       'heartbeat_unavailable': False,
       'instance': 'robotpc:4123',
+      'joints': None,
       'last_ack': dict({
         'accepted': False,
         'clock_skew_ms': 5000,

@@ -1,0 +1,122 @@
+{
+  "schema": 1,
+  "robot_id": "fake_arm_1",
+  "name": "Fake arm 1",
+  "manufacturer": null,
+  "model": "fake seven-joint arm",
+  "sw_version": null,
+  "hw_version": null,
+  "serial_number": null,
+  "suggested_area": "Workshop",
+  "bridge_version": "0.2.0",
+  "executor": {
+    "name": "fake",
+    "version": "0.2.0"
+  },
+  "session": "9f1c7a0e-4a1b-4b2c-8d1e-0f1a2b3c4d5e",
+  "instance": "robotpc:4123",
+  "capabilities": {
+    "cancel": true,
+    "feedback": true,
+    "hmac_required": false
+  },
+  "watchdog_mode": "none",
+  "heartbeat_interval_s": 2,
+  "tasks": [
+    {
+      "name": "reset",
+      "label": "Reset to home",
+      "kind": "motion",
+      "timeout_s": 60,
+      "params": null
+    },
+    {
+      "name": "stop",
+      "label": "Stop",
+      "kind": "control",
+      "timeout_s": 5,
+      "params": null
+    },
+    {
+      "name": "pause",
+      "label": "Pause",
+      "kind": "control",
+      "timeout_s": 5,
+      "params": null
+    },
+    {
+      "name": "resume",
+      "label": "Resume",
+      "kind": "control",
+      "timeout_s": 5,
+      "params": null
+    },
+    {
+      "name": "move_to",
+      "label": "Move to named pose",
+      "kind": "motion",
+      "timeout_s": 120,
+      "params": {
+        "type": "object",
+        "properties": {
+          "pose": {
+            "type": "string",
+            "enum": [
+              "home",
+              "pick",
+              "place",
+              "wave"
+            ]
+          }
+        },
+        "required": [
+          "pose"
+        ]
+      }
+    }
+  ],
+  "joints": {
+    "unit": "degrees",
+    "names": [
+      "j1",
+      "j2",
+      "j3",
+      "j4",
+      "j5",
+      "j6",
+      "j7"
+    ],
+    "limits": [
+      [
+        -170,
+        170
+      ],
+      [
+        -170,
+        170
+      ],
+      [
+        -170,
+        170
+      ],
+      [
+        -120,
+        120
+      ],
+      [
+        -170,
+        170
+      ],
+      [
+        -120,
+        120
+      ],
+      [
+        -170,
+        170
+      ]
+    ],
+    "rate_hz": 2.0
+  },
+  "ts": 1760356800000
+}

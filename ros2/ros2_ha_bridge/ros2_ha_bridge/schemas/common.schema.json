@@ -202,6 +202,27 @@
       "description": "Lower-case hex HMAC-SHA256 over topic + newline + canonical JSON of the payload without sig. Present only when a shared secret is configured.",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "joint_unit": {
+      "description": "Unit of every joint position in the announce joints block and on the joints topic: deg for degrees, rad for radians. Added 2026-10-14 (0.2.0) with the optional joint telemetry.",
+      "enum": ["deg", "rad"]
+    },
+    "joint_name": {
+      "description": "Name of one joint as announced. Same pattern as a robot id; nothing reserved. Added 2026-10-14 (0.2.0).",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,31}$"
+    },
+    "joint_limits": {
+      "description": "One [minimum, maximum] pair per announced joint, in the announced unit and in the order of names. The length must equal the length of names; a schema cannot check that, so both halves check it in code. Added 2026-10-14 (0.2.0).",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      }
     }
   }
 }

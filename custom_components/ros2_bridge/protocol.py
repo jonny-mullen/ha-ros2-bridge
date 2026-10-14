@@ -6,8 +6,8 @@ This module mirrors ``ros2/ros2_ha_bridge/ros2_ha_bridge/protocol.py`` byte for
 byte where the two halves must agree: canonical JSON, the command signature,
 the identifier patterns and the params-subset validator. On top of that it
 builds and encodes the two outbound command payloads and decodes every inbound
-kind (announce, availability, state, heartbeat, ack, feedback, result) into the
-dataclasses of ``models.py``, raising :class:`ProtocolError` with a reason on
+kind (announce, availability, state, heartbeat, ack, feedback, result, joints)
+into the dataclasses of ``models.py``, raising :class:`ProtocolError` with a reason on
 anything the schemas would refuse. It imports nothing from Home Assistant and
 performs no I/O, so it is tested against ``contract/`` on any machine.
 """
@@ -31,7 +31,9 @@ from .const import (
     DISCOVERY_PREFIX,
     GOAL_STATUS,
     INSTANCE_RE,
+    JOINT_NAME_RE,
     MAX_ANNOUNCE_BYTES,
+    MAX_JOINTS,
     MAX_PAYLOAD_BYTES,
     PARAM_TYPES,
     RESERVED_ROBOT_ID,
@@ -47,12 +49,23 @@ from .const import (
     CommandType,
     HaLink,
     HealthLevel,
+    JointUnit,
     ResultStatus,
     RobotStatus,
     TaskKind,
     WatchdogMode,
 )
-from .models import Ack, Announce, Feedback, Heartbeat, Result, RobotState, TaskSpec
+from .models import (
+    Ack,
+    Announce,
+    Feedback,
+    Heartbeat,
+    JointInfo,
+    Joints,
+    Result,
+    RobotState,
+    TaskSpec,
+)
 
 #: MQTT's own limit on a topic name.
 MAX_TOPIC_BYTES = 65535
@@ -103,6 +116,11 @@ def is_valid_session(value: object) -> bool:
 def is_valid_result_code(value: object) -> bool:
     """True for a string matching the result-code pattern."""
     return isinstance(value, str) and RESULT_CODE_RE.fullmatch(value) is not None
+
+
+def is_valid_joint_name(value: object) -> bool:
+    """True for a string matching the joint-name pattern (0.2.0)."""
+    return isinstance(value, str) and JOINT_NAME_RE.fullmatch(value) is not None
 
 
 def is_valid_instance(value: object) -> bool:
@@ -563,6 +581,30 @@ class _Fields:
             raise self.fail(f"{name} must be one of {', '.join(allowed)}")
         return value
 
+    def numbers(self, name: str, *, min_items: int, max_items: int) -> tuple[float, ...]:
+        """A list of ``min_items`` to ``max_items`` finite numbers (never booleans)."""
+        return self._numbers(name, self.present(name), min_items=min_items, max_items=max_items)
+
+    def optional_numbers(
+        self, name: str, *, min_items: int, max_items: int
+    ) -> tuple[float, ...] | None:
+        """``None`` for a null value, otherwise as :meth:`numbers`; the key must be present."""
+        value = self.present(name)
+        if value is None:
+            return None
+        return self._numbers(name, value, min_items=min_items, max_items=max_items)
+
+    def _numbers(
+        self, name: str, value: object, *, min_items: int, max_items: int
+    ) -> tuple[float, ...]:
+        if not isinstance(value, list):
+            raise self.fail(f"{name} must be a list of numbers")
+        if not min_items <= len(value) <= max_items:
+            raise self.fail(f"{name} must hold {min_items} to {max_items} numbers")
+        if not all(_is_number(item) for item in value):
+            raise self.fail(f"{name} must hold numbers only")
+        return tuple(float(item) for item in value)
+
 
 def _enum_values(enum_type: type[Any]) -> tuple[str, ...]:
     return tuple(str(member.value) for member in enum_type)
@@ -734,6 +776,50 @@ def _decode_task_spec(index: int, raw_spec: object) -> TaskSpec:
     )
 
 
+def _decode_joint_info(raw_block: object) -> tuple[JointInfo | None, str | None]:
+    """Decode an announce ``joints`` block; returns ``(info, None)`` or ``(None, reason)``.
+
+    Anything the schema refuses (a bad unit, no names, a name failing the
+    pattern, more than 32 names, a limits entry that is not a pair of numbers,
+    a rate of 0) raises :class:`ProtocolError` and the whole announce is
+    refused. A ``limits`` list whose length differs from ``names`` is not a
+    schema failure; the contract says HA ignores such a block, so it comes
+    back as ``(None, reason)`` and the announce stands without joints.
+    """
+    if not isinstance(raw_block, dict):
+        raise ProtocolError("joints must be an object", kind="announce")
+    fields = _Fields(raw_block, "announce")
+    unit = JointUnit(fields.enum("unit", _enum_values(JointUnit)))
+    names_raw = fields.present("names")
+    if not isinstance(names_raw, list):
+        raise fields.fail("joints.names must be a list")
+    if not 1 <= len(names_raw) <= MAX_JOINTS:
+        raise fields.fail(f"joints.names must hold 1 to {MAX_JOINTS} names")
+    names: list[str] = []
+    for index, name in enumerate(names_raw):
+        if not is_valid_joint_name(name):
+            raise fields.fail(f"joints.names[{index}] must match ^[a-z][a-z0-9_]{{0,31}}$")
+        assert isinstance(name, str)
+        names.append(name)
+    limits_raw = fields.present("limits")
+    limits: tuple[tuple[float, float], ...] | None = None
+    if limits_raw is not None:
+        if not isinstance(limits_raw, list):
+            raise fields.fail("joints.limits must be null or a list of [minimum, maximum] pairs")
+        pairs: list[tuple[float, float]] = []
+        for index, pair in enumerate(limits_raw):
+            if not (isinstance(pair, list) and len(pair) == 2 and all(map(_is_number, pair))):
+                raise fields.fail(f"joints.limits[{index}] must be a pair of numbers")
+            pairs.append((float(pair[0]), float(pair[1])))
+        limits = tuple(pairs)
+    rate_hz = fields.number("rate_hz", minimum=0, exclusive=True)
+    if limits is not None and len(limits) != len(names):
+        return None, (
+            f"joints.limits has {len(limits)} entries for {len(names)} names; the block is ignored"
+        )
+    return JointInfo(unit=unit, names=tuple(names), limits=limits, rate_hz=rate_hz), None
+
+
 def decode_announce(raw: RawPayload) -> Announce:
     """Decode the announce payload (64 KiB limit). An empty payload is a tombstone, not an announce."""
     data = _parse_object(raw, kind="announce", max_bytes=MAX_ANNOUNCE_BYTES)
@@ -765,6 +851,10 @@ def decode_announce(raw: RawPayload) -> Announce:
         executor = _Fields(fields.obj("executor"), "announce")
         executor_name = executor.string("name", non_empty=True)
         executor_version = executor.string("version")
+    joints: JointInfo | None = None
+    joints_ignored: str | None = None
+    if "joints" in data:
+        joints, joints_ignored = _decode_joint_info(data["joints"])
     return Announce(
         robot_id=robot_id,
         name=name,
@@ -786,6 +876,8 @@ def decode_announce(raw: RawPayload) -> Announce:
         suggested_area=fields.optional_string("suggested_area"),
         executor_name=executor_name,
         executor_version=executor_version,
+        joints=joints,
+        joints_ignored=joints_ignored,
     )
 
 
@@ -979,5 +1071,31 @@ def decode_result(raw: RawPayload) -> Result:
         started_at=started_at,
         finished_at=finished_at,
         session=session,
+        ts=ts,
+    )
+
+
+def decode_joints(raw: RawPayload) -> Joints:
+    """Decode a joints payload (0.2.0): 1 to 32 positions, velocities null or a list of numbers.
+
+    Whether the positions match the announced names in number is the hub's
+    check, because it needs the announce; the schema cannot express it.
+    """
+    data = _parse_object(raw, kind="joints", max_bytes=MAX_PAYLOAD_BYTES)
+    fields = _Fields(data, "joints")
+    robot_id = fields.robot_id()
+    positions = fields.numbers("positions", min_items=1, max_items=MAX_JOINTS)
+    velocities = fields.optional_numbers("velocities", min_items=1, max_items=MAX_JOINTS)
+    session = fields.session()
+    instance = fields.instance()
+    seq = fields.integer("seq", minimum=0)
+    ts = fields.epoch("ts")
+    return Joints(
+        robot_id=robot_id,
+        positions=positions,
+        velocities=velocities,
+        session=session,
+        instance=instance,
+        seq=seq,
         ts=ts,
     )

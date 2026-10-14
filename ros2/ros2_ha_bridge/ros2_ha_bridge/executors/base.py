@@ -19,6 +19,14 @@ thread and times each call; a call longer than ``executor.call_warn_s`` marks
 the executor degraded, and a call that never returns stalls this robot only
 (recorded decision: no thread-pool guard). ``TaskHandle`` and
 ``BridgeContext`` methods may be called from any thread.
+
+Joint telemetry (0.2.0, optional): an executor that knows its joints returns a
+:class:`JointInfo` from :meth:`TaskExecutor.joints` (called once, after
+``setup``) and reports positions through :meth:`BridgeContext.report_joints`
+as often as it likes; the bridge announces the joints, throttles the reports
+to ``telemetry.joints_rate_hz`` and publishes them on the ``joints`` topic.
+An executor without joints leaves the default ``joints()`` alone and never
+calls ``report_joints``.
 """
 
 from __future__ import annotations
@@ -37,11 +45,19 @@ from ros2_ha_bridge.clock import Clock, Scheduler, SystemClock
 TaskKind = Literal['motion', 'control', 'query']
 ResultStatus = Literal['succeeded', 'cancelled', 'aborted']
 HealthLevel = Literal['ok', 'degraded', 'error']
+JointUnit = Literal['deg', 'rad']
 
 #: Closed sets of the contract, as tuples for membership tests and parametrised tests.
 TASK_KINDS: tuple[TaskKind, ...] = get_args(TaskKind)
 RESULT_STATUSES: tuple[ResultStatus, ...] = get_args(ResultStatus)
 HEALTH_LEVELS: tuple[HealthLevel, ...] = get_args(HealthLevel)
+JOINT_UNITS: tuple[JointUnit, ...] = get_args(JointUnit)
+
+#: The most joints one robot may announce (``announce.joints.names`` maxItems).
+MAX_JOINTS = 32
+
+#: ``report_joints(positions, velocities)``: what the bridge injects into the context.
+ReportJointsFn = Callable[[Sequence[float], Sequence[float] | None], None]
 
 #: ``action_msgs/GoalStatus`` values for each terminal status (Jazzy: SUCCEEDED 4,
 #: CANCELED 5, ABORTED 6). The result payload carries both the word and the number.
@@ -114,6 +130,29 @@ class TaskResult:
         return GOAL_STATUS[self.status]
 
 
+@dataclass(frozen=True)
+class JointInfo:
+    """What an executor announces about its joints (0.2.0, optional).
+
+    ``names`` lists 1 to 32 joint names, each matching ``^[a-z][a-z0-9_]{0,31}$``,
+    in the order every later :meth:`BridgeContext.report_joints` call uses;
+    ``unit`` is ``deg`` or ``rad`` for every position and limit; ``limits`` is
+    ``None`` when the executor knows no limits, otherwise one ``(minimum,
+    maximum)`` pair per name in that unit. The bridge checks the whole object
+    with ``protocol.validate_joint_info`` at start-up and refuses to start on
+    a bad one, exactly as it does for the task catalogue.
+    """
+
+    names: Sequence[str]
+    unit: JointUnit = 'deg'
+    limits: Sequence[tuple[float, float]] | None = None
+
+    @property
+    def count(self) -> int:
+        """How many positions every report must carry."""
+        return len(self.names)
+
+
 class TaskRejected(Exception):
     """Raised from :meth:`TaskExecutor.start` to refuse a task before it begins.
 
@@ -160,7 +199,9 @@ class BridgeContext:
     must cope with ``None`` when tested. ``clock`` and ``scheduler`` let a
     plugin stay deterministic under test; ``parameters`` carries the node's
     parameters that concern the executor (for example ``fake.task_duration_s``)
-    as a read-only mapping keyed by their dotted names.
+    as a read-only mapping keyed by their dotted names. ``report_joints`` is
+    the bridge's joint-telemetry sink (0.2.0); when none is injected, as in a
+    unit test that does not care about joints, reports are dropped silently.
     """
 
     def __init__(
@@ -177,6 +218,7 @@ class BridgeContext:
         scheduler: Scheduler | None = None,
         parameters: Mapping[str, Any] | None = None,
         node: Any = None,
+        report_joints: ReportJointsFn | None = None,
     ) -> None:
         self.robot_id = robot_id
         self.logger = logger
@@ -189,6 +231,8 @@ class BridgeContext:
         self._clear_error = clear_error
         self._set_paused = set_paused
         self._ha_link_ok = ha_link_ok
+        self._report_joints = report_joints
+        self._joints_dropped_logged = False
 
     def post(self, fn: Callable[[], None]) -> None:
         """Run ``fn`` on the bridge's main thread as soon as it is free.
@@ -214,14 +258,41 @@ class BridgeContext:
         """True while Home Assistant's heartbeat is being seen within the watchdog window."""
         return self._ha_link_ok()
 
+    def report_joints(
+        self, positions: Sequence[float], velocities: Sequence[float] | None = None
+    ) -> None:
+        """Report the current joint positions (and optionally velocities) to the bridge.
+
+        ``positions`` carries one number per name of the :class:`JointInfo`
+        the executor returned from :meth:`TaskExecutor.joints`, in that order
+        and in that unit; ``velocities`` is ``None`` or one number per
+        position in the unit per second. Thread-safe like
+        :meth:`TaskHandle.feedback`: the values are copied here and the call
+        is posted to the bridge's main thread, which throttles the stream to
+        ``telemetry.joints_rate_hz`` and publishes it. Call it as often as the
+        driver reports; the bridge drops what it does not need. With no sink
+        injected (a unit test, or an executor that announced no joints) the
+        report is dropped and nothing is raised.
+        """
+        sink = self._report_joints
+        if sink is None:
+            if not self._joints_dropped_logged:
+                self._joints_dropped_logged = True
+                self.logger.debug('report_joints called with no telemetry sink; reports dropped')
+            return
+        snapshot = tuple(positions)
+        speeds = None if velocities is None else tuple(velocities)
+        self._post(lambda: sink(snapshot, speeds))
+
 
 class TaskExecutor(ABC):
     """Base class for robot-specific executors. Subclass and implement the four abstract methods.
 
     Lifecycle: ``setup`` once (blocking waits for drivers are allowed here only),
-    ``tasks`` once per announce, then any number of ``start`` and ``cancel``
-    calls, ``health`` once per ``executor.health_poll_s``, ``stop_and_hold``
-    when the watchdog says so, and ``shutdown`` once at exit.
+    ``tasks`` once per announce, ``joints`` once right after that, then any
+    number of ``start`` and ``cancel`` calls, ``health`` once per
+    ``executor.health_poll_s``, ``stop_and_hold`` when the watchdog says so,
+    and ``shutdown`` once at exit.
     """
 
     #: Plugin name and version, announced to Home Assistant.
@@ -235,6 +306,17 @@ class TaskExecutor(ABC):
     @abstractmethod
     def tasks(self) -> Sequence[TaskSpec]:
         """The task catalogue before the operator's ``tasks.allow`` intersection."""
+
+    def joints(self) -> JointInfo | None:
+        """The joints this executor reports through ``ctx.report_joints``, or ``None``.
+
+        Called once at start-up, after :meth:`setup`. The default announces
+        no joints, so the node publishes no telemetry and Home Assistant
+        creates no joint sensors; an executor that returns a
+        :class:`JointInfo` must report positions of exactly that length and
+        order.
+        """
+        return None
 
     @abstractmethod
     def start(self, req: TaskRequest, handle: TaskHandle) -> None:

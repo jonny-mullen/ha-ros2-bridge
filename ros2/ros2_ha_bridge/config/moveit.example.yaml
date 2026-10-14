@@ -39,6 +39,14 @@
     # time to stop; the default is 5.0 and the dotted spelling is needed because "executor" is a
     # value above.
     executor.cancel_grace_s: 5.0
+    telemetry:
+      # Joint telemetry (0.2.0): the moveit executor forwards the group's joints from
+      # sensor_msgs/JointState in radians. Most joints messages per second; 0 disables the topic
+      # and the announce block.
+      joints_rate_hz: 2.0
+      # Least movement of one joint (radians here) that publishes; 0 means the unit default,
+      # 0.01 rad.
+      joints_min_delta: 0.0
     moveit:
       # The MoveIt planning group, as named in your SRDF (required). The NVIDIA Isaac Sim
       # ros2_control reference uses the UR10 with ur_moveit_config, whose group is below;
@@ -56,6 +64,13 @@
       # holding), and the stop task clears a robot error only on that confirmation; false: both
       # happen as soon as the cancel request has been sent.
       hold_on_cancel: true
+      # The sensor_msgs/JointState topic the joint telemetry is read from (best-effort QoS, so a
+      # reliable joint_state_broadcaster matches too).
+      joint_states_topic: /joint_states
+      # The joints reported to Home Assistant, in order; empty (the default) takes the joints of
+      # the first pose below in their written order. Names are announced lower-cased with other
+      # characters replaced by "_"; two names that collapse into one switch the telemetry off.
+      # joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_1_joint, wrist_2_joint, wrist_3_joint]
       # The poses may come from a YAML file instead of the inline block below (the same mapping,
       # optionally under a "poses" key); the refresh_poses task re-reads it without a node
       # restart: changed positions and removed poses take effect at once, but a new pose name is

@@ -3,7 +3,7 @@
 """The bridge hub: MQTT subscriptions, the robot table and the command path.
 
 ``BridgeHub`` is a push hub without a coordinator. ``async_start`` opens the
-seven wildcard subscriptions on Home Assistant's own MQTT connection with
+eight wildcard subscriptions on Home Assistant's own MQTT connection with
 synchronous handlers, watches the ack and result subscriptions for ``ready``
 (bounded by ``READY_TIMEOUT_S``), follows the MQTT connection status, runs the
 HA heartbeat and the 1 s housekeeping timer, and after a ``REPLAY_SETTLE_S``
@@ -97,6 +97,8 @@ from .const import (
     SESSION_CHANGE_GRACE_S,
     SIGNAL_CONNECTION_CHANGED,
     SIGNAL_ROBOT_ADDED,
+    SIGNAL_ROBOT_JOINTS_CHANGED,
+    SIGNAL_ROBOT_JOINTS_UPDATED,
     SIGNAL_ROBOT_REMOVED,
     SIGNAL_ROBOT_TASKS_CHANGED,
     SIGNAL_ROBOT_UPDATED,
@@ -117,11 +119,12 @@ from .const import (
     ha_heartbeat_topic,
     heartbeat_filter,
     issue_id,
+    joints_filter,
     result_filter,
     state_filter,
     state_topic,
 )
-from .models import Announce, LastResult, PendingCommand, Robot, TaskSpec
+from .models import Announce, JointInfo, LastResult, PendingCommand, Robot, TaskSpec
 from .protocol import (
     CommandSource,
     ProtocolError,
@@ -131,6 +134,7 @@ from .protocol import (
     decode_availability,
     decode_feedback,
     decode_heartbeat,
+    decode_joints,
     decode_result,
     decode_state,
     encode_command,
@@ -336,6 +340,7 @@ class BridgeHub:
             (ack_filter(prefix), 1, self._on_ack),
             (result_filter(prefix), 1, self._on_result),
             (feedback_filter(prefix), 0, self._on_feedback),
+            (joints_filter(prefix), 0, self._on_joints),
         ]
         for topic, qos, handler in plan:
             self._unsubscribers.append(
@@ -684,6 +689,14 @@ class BridgeHub:
         elif robot.hmac_rejected_open and not announce.hmac_required:
             robot.hmac_rejected_open = False
             self._close_issue(ISSUE_HMAC_REJECTED, robot_id)
+        if announce.joints_ignored is not None and (
+            previous is None or previous.joints_ignored != announce.joints_ignored
+        ):
+            _LOGGER.warning(
+                "Robot %s announce: %s; no joint sensors are made",
+                robot_id,
+                announce.joints_ignored,
+            )
         if is_new:
             _LOGGER.info("Robot %s announced (%s)", robot_id, announce.name)
             async_dispatcher_send(self.hass, SIGNAL_ROBOT_ADDED, robot_id)
@@ -700,6 +713,14 @@ class BridgeHub:
                     robot_id,
                     tuple(name for name in announce.task_names if name not in before),
                     tuple(name for name in previous.task_names if name not in after),
+                )
+            added, removed = _joint_diff(previous.joints, announce.joints)
+            if added or removed:
+                # The positions held so far belong to the old layout (or unit); the node
+                # publishes a fresh set with every announce, so nothing is lost by waiting.
+                robot.joints = None
+                async_dispatcher_send(
+                    self.hass, SIGNAL_ROBOT_JOINTS_CHANGED, robot_id, added, removed
                 )
             self._dispatch_updated(robot_id)
         if session_changed:
@@ -982,6 +1003,73 @@ class BridgeHub:
             self._dispatch_updated(robot_id)
         else:
             self._feedback_pending.add(robot_id)
+
+    @callback
+    def _on_joints(self, msg: ReceiveMessage) -> None:
+        self._guard("joints", msg, lambda: self._handle_joints(msg))
+
+    def _handle_joints(self, msg: ReceiveMessage) -> None:
+        """Keep the latest positions of an announced joint layout; drop what does not fit.
+
+        A payload for a robot that has not announced a ``joints`` block (yet) is
+        ignored without a count: a live QoS 0 message can overtake the retained
+        announce on a fresh subscription, and the node repeats the positions.
+        One whose ``positions`` length differs from the announced names, or
+        whose ``velocities`` are not one per position, is counted as
+        mismatched, and one whose ``seq`` regresses within the same session as
+        a regression, exactly as for ``state``.
+        """
+        split = self._robot_segment(msg)
+        if split is None:
+            return
+        robot_id, _rest = split
+        joints = decode_joints(_payload_bytes(msg))
+        if joints.robot_id != robot_id:
+            self.counters["mismatched_payloads"] += 1
+            return
+        robot = self.robots.get(robot_id)
+        info = robot.joint_info if robot is not None else None
+        if robot is None or info is None:
+            self._log_once(
+                f"{msg.topic}#unannounced", "Ignoring %s: no joints block announced", msg.topic
+            )
+            return
+        if len(joints.positions) != info.count:
+            self.counters["mismatched_payloads"] += 1
+            self._log_once(
+                f"{msg.topic}#length",
+                "Dropping joints for %s: %d positions for %d announced names",
+                robot_id,
+                len(joints.positions),
+                info.count,
+            )
+            return
+        if joints.velocities is not None and len(joints.velocities) != info.count:
+            self.counters["mismatched_payloads"] += 1
+            self._log_once(
+                f"{msg.topic}#velocities",
+                "Dropping joints for %s: %d velocities for %d positions",
+                robot_id,
+                len(joints.velocities),
+                info.count,
+            )
+            return
+        previous = robot.joints
+        if (
+            previous is not None
+            and previous.session == joints.session
+            and joints.seq < previous.seq
+        ):
+            self.counters["seq_regressions"] += 1
+            _LOGGER.debug(
+                "Dropping joints seq %d for %s (have %d)", joints.seq, robot_id, previous.seq
+            )
+            return
+        robot.joints = joints
+        session_changed = self._note_identity(robot, joints.session, joints.instance, self.now)
+        async_dispatcher_send(self.hass, SIGNAL_ROBOT_JOINTS_UPDATED, robot_id)
+        if session_changed:
+            self._schedule_grace(robot_id)
 
     @callback
     def _on_result(self, msg: ReceiveMessage) -> None:
@@ -1457,6 +1545,7 @@ class BridgeHub:
                         "message": robot.feedback.message,
                     }
                 ),
+                "joints": None if robot.joints is None else robot.joints.to_dict(),
                 "pending": [c.task_id for c in self.registry.outstanding(robot_id)],
                 "problem_reasons": self.problem_reasons(robot_id),
             }
@@ -1524,6 +1613,32 @@ async def async_clear_robot_topics(hass: HomeAssistant, prefix: str, robot_id: s
             failures += 1
             _LOGGER.warning("Could not clear %s: %s", topic, error)
     return failures
+
+
+def _joint_diff(
+    previous: JointInfo | None, current: JointInfo | None
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """Which joint sensor indices a changed announce block adds and removes.
+
+    A joint sensor is identified by its index and configured by the name, unit
+    and limits at that index, so an index whose configuration changed is listed
+    in both tuples: the sensor platform removes the old entity and adds a new
+    one with the new name and unit.
+    """
+    added: list[int] = []
+    removed: list[int] = []
+    before = 0 if previous is None else previous.count
+    after = 0 if current is None else current.count
+    for index in range(max(before, after)):
+        old = previous.joint_key(index) if previous is not None and index < before else None
+        new = current.joint_key(index) if current is not None and index < after else None
+        if old == new:
+            continue
+        if old is not None:
+            removed.append(index)
+        if new is not None:
+            added.append(index)
+    return tuple(added), tuple(removed)
 
 
 def _payload_bytes(msg: ReceiveMessage) -> bytes:

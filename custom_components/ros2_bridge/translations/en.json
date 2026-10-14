@@ -88,6 +88,9 @@
           "timeout": "Timed out",
           "lost": "Lost"
         }
+      },
+      "joint": {
+        "name": "Joint {index} {joint_name}"
       }
     },
     "binary_sensor": {

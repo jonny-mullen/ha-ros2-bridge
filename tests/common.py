@@ -29,6 +29,7 @@ from custom_components.ros2_bridge.models import (
     Announce,
     Feedback,
     Heartbeat,
+    Joints,
     Result,
     RobotState,
 )
@@ -52,6 +53,7 @@ KINDS: tuple[str, ...] = (
     "feedback",
     "result",
     "sensor",
+    "joints",
 )
 #: Kinds the HA side decodes, with the protocol function that decodes each.
 INBOUND_DECODERS: dict[str, Callable[[bytes], Any]] = {
@@ -62,6 +64,7 @@ INBOUND_DECODERS: dict[str, Callable[[bytes], Any]] = {
     "ack": protocol.decode_ack,
     "feedback": protocol.decode_feedback,
     "result": protocol.decode_result,
+    "joints": protocol.decode_joints,
 }
 
 #: The placeholder secret of ``contract/hmac_vectors.json`` and the signed golden commands.
@@ -241,6 +244,25 @@ def result_payload(**overrides: Any) -> dict[str, Any]:
     return _with(base, overrides)
 
 
+def joints_block() -> dict[str, Any]:
+    """The golden announce ``joints`` block: seven joints in degrees, ready to be edited."""
+    block = golden("announce", "with_joints")["joints"]
+    assert isinstance(block, dict)
+    return block
+
+
+def announce_with_joints_payload(**overrides: Any) -> dict[str, Any]:
+    """The full catalogue announce for ``ROBOT_ID`` carrying the golden joints block."""
+    return _with(announce_payload(joints=joints_block()), overrides)
+
+
+def joints_payload(**overrides: Any) -> dict[str, Any]:
+    """The golden seven-joint payload (``seq`` 7), re-pointed at ``ROBOT_ID`` unless overridden."""
+    base = golden("joints", "seven_joints_deg")
+    base["robot_id"] = ROBOT_ID
+    return _with(base, overrides)
+
+
 def encode(payload: Any) -> bytes:
     """Compact UTF-8 JSON, the way the node publishes."""
     return json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
@@ -276,6 +298,10 @@ def make_feedback(**overrides: Any) -> Feedback:
 
 def make_result(**overrides: Any) -> Result:
     return protocol.decode_result(encode(result_payload(**overrides)))
+
+
+def make_joints(**overrides: Any) -> Joints:
+    return protocol.decode_joints(encode(joints_payload(**overrides)))
 
 
 # --------------------------------------------------------------------------- MQTT helpers
