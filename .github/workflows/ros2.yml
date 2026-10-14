@@ -22,7 +22,7 @@ jobs:
           cache: pip
           cache-dependency-path: ros2/ros2_ha_bridge/requirements.txt
       - name: Install test requirements
-        run: python -m pip install pytest pytest-asyncio jsonschema -r ros2/ros2_ha_bridge/requirements.txt
+        run: python -m pip install pytest pytest-asyncio jsonschema pyyaml -r ros2/ros2_ha_bridge/requirements.txt
       - name: pytest (modules that need rclpy are deselected)
         run: |
           set +e
@@ -57,7 +57,7 @@ jobs:
           rosdep update --rosdistro "$ROS_DISTRO"
           rosdep install --from-paths ros2 --ignore-src -y --rosdistro "$ROS_DISTRO"
       - name: Install pip requirements (paho-mqtt from pip, apt ships 1.6.1)
-        run: python3 -m pip install -r ros2/ros2_ha_bridge/requirements.txt
+        run: python3 -m pip install -r ros2/ros2_ha_bridge/requirements.txt jsonschema pyyaml
       - name: colcon build
         working-directory: ros2
         run: |
