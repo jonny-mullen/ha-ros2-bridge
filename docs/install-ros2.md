@@ -34,11 +34,11 @@ The package lives at `ros2/ros2_ha_bridge` in the repository. Clone the reposito
 
 ```text
 mkdir -p ~/bridge_ws/src
-git clone https://github.com/<owner>/ha-ros2-bridge.git ~/ha-ros2-bridge
+git clone https://github.com/jonnytinkererofthings/ha-ros2-bridge.git ~/ha-ros2-bridge
 ln -s ~/ha-ros2-bridge/ros2/ros2_ha_bridge ~/bridge_ws/src/ros2_ha_bridge
 ```
 
-Replace `<owner>` with the repository's owner once it is published; until then, copy the folder from wherever you have it.
+Until the first tagged release exists, copy the folder from wherever you obtained the repository; the apt route follows the release.
 
 ## 3. Install the dependencies
 

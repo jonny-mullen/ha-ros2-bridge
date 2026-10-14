@@ -16,7 +16,7 @@ Any robot that runs `ros2_ha_bridge` works, including one running the shipped `f
 ### Through HACS (custom repository)
 
 1. In HACS, open the three-dot menu and choose Custom repositories.
-2. Enter `https://github.com/<owner>/ha-ros2-bridge` (replace `<owner>` with the repository's owner once it is published), choose the type Integration and add it.
+2. Enter `https://github.com/jonnytinkererofthings/ha-ros2-bridge`, choose the type Integration and add it.
 3. Search HACS for "ROS 2 Bridge", download it, and restart Home Assistant when HACS asks.
 
 ### By copying the folder
