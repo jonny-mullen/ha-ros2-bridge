@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+# ROS 2 / colcon
+ros2/build/
+ros2/install/
+ros2/log/
+# Tooling
+tools/.env
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
