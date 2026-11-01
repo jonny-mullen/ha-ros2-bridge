@@ -7,5 +7,5 @@ pytest-homeassistant-custom-component==0.13.372
 syrupy
 pytest-cov
 jsonschema==4.26.0
-ruff==0.17.0
+ruff==0.17.3
 mypy==2.4.0
